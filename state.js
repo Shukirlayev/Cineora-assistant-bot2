@@ -28,14 +28,17 @@ async function saveState() {
     try {
         await fs.writeFile(DATA_FILE, JSON.stringify(state, null, 2), 'utf8');
     } catch (error) {
-        console.error("Failed to save state", error);
+        console.error("Ma'lumotlarni saqlashda xatolik:", error);
     }
 }
 
 function generateCaption(index) {
     const s = String(state.season).padStart(2, '0');
     const e = String(index + 1).padStart(2, '0');
-    let caption = `${state.title}\nS${s}E${e}`;
+    
+    // Nomi va S01E01 qismlari qalin (bold) formatda bo'ladi
+    let caption = `<b>${state.title}</b>\n<b>S${s}E${e}</b>`;
+    
     if (state.template && state.template.trim() !== "") {
         caption += `\n\n${state.template}`;
     }
