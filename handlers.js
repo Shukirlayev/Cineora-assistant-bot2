@@ -31,34 +31,39 @@ const getMenuKeyboard = () => {
     ]);
 };
 
+// Eski menyuni toza o'chirib, har doim eng pastda yangi xabar sifatida chiqarish
 const sendMenu = async (ctx) => {
-    waitingFor.type = null;
-    waitingFor.menuMessageId = null;
-    await ctx.replyWithHTML(getMenuText(), getMenuKeyboard());
-};
-
-const updateMenuOrReply = async (ctx) => {
     waitingFor.type = null;
     if (waitingFor.menuMessageId) {
         try {
-            await ctx.telegram.editMessageText(ctx.chat.id, waitingFor.menuMessageId, null, getMenuText(), {
-                parse_mode: 'HTML',
-                ...getMenuKeyboard()
-            });
-            waitingFor.menuMessageId = null;
-            return;
-        } catch (e) { /* tahrirlashda xato bo'lsa pastga tushadi */ }
+            await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.menuMessageId);
+        } catch (e) { /* xabar topilmasa xatolikni o'tkazib yuborish */ }
     }
-    await sendMenu(ctx);
+    const sent = await ctx.replyWithHTML(getMenuText(), getMenuKeyboard());
+    waitingFor.menuMessageId = sent.message_id;
+};
+
+// Bildirishnomalarni 7 soniyadan keyin avtomatik o'chirish yordamchisi
+const autoDeleteMessage = (ctx, msgId, delay = 7000) => {
+    setTimeout(async () => {
+        try {
+            await ctx.telegram.deleteMessage(ctx.chat.id, msgId);
+        } catch (e) { /* o'chib bo'lgan bo'lsa o'tkazib yuboriladi */ }
+    }, delay);
 };
 
 const handleInputPrompt = async (ctx, promptText) => {
+    waitingFor.type = ctx.callbackQuery ? waitingFor.type : waitingFor.type; 
+    const keyboard = Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]);
+    
     if (ctx.callbackQuery) {
-        waitingFor.menuMessageId = ctx.callbackQuery.message.message_id;
-        const keyboard = Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]);
         await ctx.editMessageText(promptText, { parse_mode: 'HTML', ...keyboard });
     } else {
-        await ctx.replyWithHTML(promptText);
+        const sent = await ctx.replyWithHTML(promptText, keyboard);
+        if (waitingFor.menuMessageId) {
+            try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.menuMessageId); } catch(e){}
+        }
+        waitingFor.menuMessageId = sent.message_id;
     }
 };
 
@@ -119,13 +124,13 @@ const handlePost = async (ctx) => {
         const lastPreview = generateCaption(state.queue.length - 1);
 
         const keyboard = Markup.inlineKeyboard([
-            [Markup.button.callback('🚀 HA, KANALGA JOYLANMASIN', 'confirm_post'), Markup.button.callback('❌ BEKOR QILISH', 'action_back_to_menu')]
+            [Markup.button.callback('🚀 HA, KANALGA JOYLANSIN', 'confirm_post'), Markup.button.callback('❌ BEKOR QILISH', 'action_back_to_menu')]
         ]);
 
         const confirmationText = `🚀 <b>Kanalga jami ${state.queue.length} ta video quyidagi ko'rinishda joylanadi:</b>\n\n` +
-            `<b>[Birinchi qism namuna]:</b>\n${firstPreview}\n` +
+            `<b>[Birinchi qism]:</b>\n${firstPreview}\n` +
             `----------------------------------------\n` +
-            `<b>[Oxirgi qism namuna]:</b>\n${lastPreview}\n\n` +
+            `<b>[Oxirgi qism]:</b>\n${lastPreview}\n\n` +
             `⚠️ Tasdiqlaysizmi?`;
 
         await ctx.editMessageText(confirmationText, { parse_mode: 'HTML', ...keyboard });
@@ -133,13 +138,19 @@ const handlePost = async (ctx) => {
 };
 
 const handleHelp = async (ctx) => {
+    if (waitingFor.menuMessageId) {
+        try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.menuMessageId); } catch(e){}
+        waitingFor.menuMessageId = null;
+    }
     const helpText = `📖 <b>Botdan foydalanish qo'llanmasi:</b>\n\n` +
-        `1️⃣ <b>Shablonni sozlang:</b> Boshqaruv panelidan foydalanib 🎬 Nomi, 📺 Mavsum va 🧾 Shablon matnini kiriting.\n` +
-        `2️⃣ <b>Videolarni yuboring:</b> Botga videolarni ketma-ketlikda shunchaki yuboring. Bot ularni avtomatik navbatga oladi va qism raqamini belgilaydi.\n` +
-        `3️⃣ <b>Tekshirish:</b> 📋 Navbat yoki 👁 Ko'rinish tugmalari orqali xabarlarni tekshiring.\n` +
-        `4️⃣ <b>Joylash:</b> 🚀 Kanalga joylash tugmasini bossangiz bot hammasini kanalga chiroyli qilib tartib bilan yuboradi va navbatni tozalaydi.\n\n` +
-        `⚙ <i>Bot faqat hisob egasi uchun ishlaydi, boshqalarga javob bermaydi.</i>`;
-    await ctx.replyWithHTML(helpText);
+        `1️⃣ <b>Shablonni sozlang:</b> Boshqaruv panelidan foydalanib Nomi, Mavsum va Shablon matnini kiriting.\n` +
+        `2️⃣ <b>Videolarni yuboring:</b> Botga videolarni ketma-ketlikda shunchaki yuboring. Nomini keyin o'zgartirsangiz ham kanalga to'g'ri nomi bilan ketadi.\n` +
+        `3️⃣ <b>Tekshirish:</b> Navbat ro'yxati yoki Ko'rinish tugmalari orqali tekshiring.\n` +
+        `4️⃣ <b>Joylash:</b> Kanalga joylash tugmasini bossangiz bot tartib bilan yuboradi va navbatni avtomat tozalaydi.\n\n` +
+        `⚙ <i>Bot faqat hisob egasi uchun ishlaydi. Har qanday bildirishnoma xabarlari 7 soniyada o'chib ketadi. Menyuingiz doimo eng pastda turadi.</i>`;
+    
+    const sent = await ctx.replyWithHTML(helpText, Markup.inlineKeyboard([[Markup.button.callback('⬅️ Menyoga qaytish', 'action_back_to_menu')]]));
+    waitingFor.menuMessageId = sent.message_id;
 };
 
 const registerHandlers = (bot) => {
@@ -162,17 +173,16 @@ const registerHandlers = (bot) => {
 
     bot.action('action_cancel_input', async (ctx) => {
         try {
-            waitingFor.type = null;
-            waitingFor.menuMessageId = null;
-            await ctx.editMessageText(getMenuText(), { parse_mode: 'HTML', ...getMenuKeyboard() });
-        } catch (e) { await sendMenu(ctx); }
+            await sendMenu(ctx);
+        } catch (e) { console.error(e); }
     });
 
     bot.action('confirm_clear', async (ctx) => {
         try {
             state.queue = [];
             await saveState();
-            await ctx.editMessageText('🗑 Navbat muvaffaqiyatli tozalandi.');
+            const info = await ctx.replyWithHTML('🗑 Navbat muvaffaqiyatli tozalandi.');
+            autoDeleteMessage(ctx, info.message_id);
             await sendMenu(ctx);
         } catch (e) { console.error(e); }
     });
@@ -190,7 +200,8 @@ const registerHandlers = (bot) => {
                     });
                     successCount++;
                 } catch (error) {
-                    await ctx.reply(`❌ Xatolik yuz berdi (Qism index ${i}): ${error.message}`);
+                    const errNotif = await ctx.reply(`❌ Xatolik yuz berdi (Qism index ${i}): ${error.message}`);
+                    autoDeleteMessage(ctx, errNotif.message_id, 15000);
                     break; 
                 }
             }
@@ -198,11 +209,13 @@ const registerHandlers = (bot) => {
             if (successCount === state.queue.length && state.queue.length > 0) {
                 state.queue = [];
                 await saveState();
-                await ctx.reply(`✅ Muvaffaqiyatli bajarildi! Jami ${successCount} ta qism kanalga joylandi va navbat tozalandi.`);
+                const statusNotif = await ctx.replyWithHTML(`✅ Muvaffaqiyatli bajarildi! Jami ${successCount} ta qism kanalga joylandi.`);
+                autoDeleteMessage(ctx, statusNotif.message_id);
             } else if (successCount > 0) {
                 state.queue = state.queue.slice(successCount);
                 await saveState();
-                await ctx.reply(`⚠️ Yuklash qisman to'xtadi. ${successCount} ta qism joylandi. Qolgan qismlar navbatda saqlab qolindi.`);
+                const partialNotif = await ctx.replyWithHTML(`⚠️ Yuklash qisman to'xtadi. ${successCount} ta qism joylandi.`);
+                autoDeleteMessage(ctx, partialNotif.message_id);
             }
             await sendMenu(ctx);
         } catch (e) { console.error(e); }
@@ -210,39 +223,54 @@ const registerHandlers = (bot) => {
 
     bot.on('video', async (ctx) => {
         try {
+            // Bir vaqtning o'zida yuborilgan videolarni ham xavfsiz qabul qiladi
             state.queue.push(ctx.message.video.file_id);
             await saveState();
+            
             const sStr = String(state.season).padStart(2, '0');
             const eStr = String(state.queue.length).padStart(2, '0');
-            await ctx.replyWithHTML(`✅ Video navbatga qo'shildi: <b>S${sStr}E${eStr}</b>\nJami navbatda: <b>${state.queue.length} ta</b>`);
+            
+            const sentNotif = await ctx.replyWithHTML(`✅ Video navbatga qo'shildi: <b>S${sStr}E${eStr}</b>\nJami navbatda: <b>${state.queue.length} ta</b>`);
+            autoDeleteMessage(ctx, sentNotif.message_id);
+            
+            // Har bitta yangi video qo'shilganda menyuni ham eng pastga tushiramiz
+            await sendMenu(ctx);
         } catch (e) { console.error(e); }
     });
 
     bot.on('text', async (ctx, next) => {
         try {
             if (!waitingFor.type) {
-                return await ctx.replyWithHTML('⚠️ Noma\'lum matn. Iltimos quyidagi boshqaruv panelidan foydalaning yoki /start bosing.');
+                const warn = await ctx.replyWithHTML('⚠️ Noma\'lum matn. Iltimos quyidagi boshqaruv panelidan foydalaning yoki /start bosing.');
+                autoDeleteMessage(ctx, warn.message_id);
+                return;
             }
             const text = ctx.message.text;
 
             if (waitingFor.type === 'title') {
                 state.title = text;
-                await ctx.replyWithHTML(`✅ Kino/Serial nomi yangilandi: <b>${state.title}</b>`);
+                const info = await ctx.replyWithHTML(`✅ Kino/Serial nomi yangilandi: <b>${state.title}</b>`);
+                autoDeleteMessage(ctx, info.message_id);
             } else if (waitingFor.type === 'season') {
                 const parsed = parseInt(text, 10);
-                if (isNaN(parsed)) return ctx.reply('❌ Noto\'g\'ri raqam. Mavsum raqamini qayta yuboring:');
+                if (isNaN(parsed)) {
+                    const err = await ctx.reply('❌ Noto\'g\'ri raqam. Mavsum raqamini qayta yuboring:');
+                    autoDeleteMessage(ctx, err.message_id);
+                    return;
+                }
                 state.season = parsed;
-                await ctx.replyWithHTML(`✅ Mavsum raqami yangilandi: <b>${state.season}</b>`);
+                const info = await ctx.replyWithHTML(`✅ Mavsum raqami yangilandi: <b>${state.season}</b>`);
+                autoDeleteMessage(ctx, info.message_id);
             } else if (waitingFor.type === 'template') {
                 state.template = text;
-                await ctx.replyWithHTML(`✅ Doimiy shablon matni muvaffaqiyatli saqlandi.`);
+                const info = await ctx.replyWithHTML(`✅ Doimiy shablon matni muvaffaqiyatli saqlandi.`);
+                autoDeleteMessage(ctx, info.message_id);
             }
 
             await saveState();
-            await updateMenuOrReply(ctx);
+            await sendMenu(ctx);
         } catch (e) {
             console.error(e);
-            waitingFor.type = null;
             await sendMenu(ctx);
         }
     });
