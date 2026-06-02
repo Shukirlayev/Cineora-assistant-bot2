@@ -88,71 +88,86 @@ const registerHandlers = (bot) => {
     bot.action('action_post', handlePost);
 
     bot.action('cancel', async (ctx) => {
-        await ctx.editMessageText('Action cancelled.');
-        await sendMenu(ctx);
+        try {
+            await ctx.editMessageText('Action cancelled.');
+            await sendMenu(ctx);
+        } catch (e) { console.error(e); }
     });
 
     bot.action('confirm_clear', async (ctx) => {
-        state.queue = [];
-        await saveState();
-        await ctx.editMessageText('🗑 Queue has been cleared.');
+        try {
+            state.queue = [];
+            await saveState();
+            await ctx.editMessageText('🗑 Queue has been cleared.');
+        } catch (e) { console.error(e); }
     });
 
     bot.action('confirm_post', async (ctx) => {
-        await ctx.editMessageText('🚀 Posting in progress...');
-        let successCount = 0;
+        try {
+            await ctx.editMessageText('🚀 Posting in progress...');
+            let successCount = 0;
 
-        for (let i = 0; i < state.queue.length; i++) {
-            try {
-                await ctx.telegram.sendVideo(TELEGRAM_CHANNEL_ID, state.queue[i], {
-                    caption: generateCaption(i)
-                });
-                successCount++;
-            } catch (error) {
-                await ctx.reply(`❌ Failed index ${i}: ${error.message}`);
-                break; 
+            for (let i = 0; i < state.queue.length; i++) {
+                try {
+                    await ctx.telegram.sendVideo(TELEGRAM_CHANNEL_ID, state.queue[i], {
+                        caption: generateCaption(i)
+                    });
+                    successCount++;
+                } catch (error) {
+                    await ctx.reply(`❌ Failed index ${i}: ${error.message}`);
+                    break; 
+                }
             }
-        }
 
-        if (successCount === state.queue.length && state.queue.length > 0) {
-            state.queue = [];
-            await saveState();
-            await ctx.reply(`✅ Posted ${successCount} video(s). Queue cleared.`);
-        } else if (successCount > 0) {
-            state.queue = state.queue.slice(successCount);
-            await saveState();
-            await ctx.reply(`⚠️ Partially posted ${successCount} video(s).`);
-        }
+            if (successCount === state.queue.length && state.queue.length > 0) {
+                state.queue = [];
+                await saveState();
+                await ctx.reply(`✅ Posted ${successCount} video(s). Queue cleared.`);
+            } else if (successCount > 0) {
+                state.queue = state.queue.slice(successCount);
+                await saveState();
+                await ctx.reply(`⚠️ Partially posted ${successCount} video(s).`);
+            }
+        } catch (e) { console.error(e); }
     });
 
     bot.on('video', async (ctx) => {
-        state.queue.push(ctx.message.video.file_id);
-        await saveState();
-        const sStr = String(state.season).padStart(2, '0');
-        const eStr = String(state.queue.length).padStart(2, '0');
-        await ctx.reply(`✅ Video added: S${sStr}E${eStr}\nTotal: ${state.queue.length}`);
+        try {
+            state.queue.push(ctx.message.video.file_id);
+            await saveState();
+            const sStr = String(state.season).padStart(2, '0');
+            const eStr = String(state.queue.length).padStart(2, '0');
+            await ctx.reply(`✅ Video added: S${sStr}E${eStr}\nTotal: ${state.queue.length}`);
+        } catch (e) { console.error(e); }
     });
 
     bot.on('text', async (ctx, next) => {
-        if (!waitingFor.type) return next();
-        const text = ctx.message.text;
+        try {
+            if (!waitingFor.type) {
+                return await ctx.reply('⚠️ Noma\'lum matn. Iltimos menyudan foydalaning yoki /start bosing.');
+            }
+            const text = ctx.message.text;
 
-        if (waitingFor.type === 'title') {
-            state.title = text;
-            await ctx.reply(`✅ Title updated to:\n${state.title}`);
-        } else if (waitingFor.type === 'season') {
-            const parsed = parseInt(text, 10);
-            if (isNaN(parsed)) return ctx.reply('❌ Invalid number. Send season again:');
-            state.season = parsed;
-            await ctx.reply(`✅ Season updated to:\n${state.season}`);
-        } else if (waitingFor.type === 'template') {
-            state.template = text;
-            await ctx.reply(`✅ Template updated.`);
+            if (waitingFor.type === 'title') {
+                state.title = text;
+                await ctx.reply(`✅ Title updated to:\n${state.title}`);
+            } else if (waitingFor.type === 'season') {
+                const parsed = parseInt(text, 10);
+                if (isNaN(parsed)) return ctx.reply('❌ Invalid number. Send season again:');
+                state.season = parsed;
+                await ctx.reply(`✅ Season updated to:\n${state.season}`);
+            } else if (waitingFor.type === 'template') {
+                state.template = text;
+                await ctx.reply(`✅ Template updated.`);
+            }
+
+            waitingFor.type = null;
+            await saveState();
+            await sendMenu(ctx);
+        } catch (e) {
+            console.error(e);
+            waitingFor.type = null;
         }
-
-        waitingFor.type = null;
-        await saveState();
-        await sendMenu(ctx);
     });
 };
 
