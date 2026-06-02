@@ -15,13 +15,12 @@ bot.use(async (ctx, next) => {
     try {
         await next();
     } catch (error) {
-        console.error("Havfsizlik filtri ichida xatolik:", error);
+        console.error("Xavfsizlik filtri xatosi:", error);
     }
 });
 
 registerHandlers(bot);
 
-// Cron-job uchun faqat qisqa 'OK' qaytaruvchi toza server
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('OK');
@@ -32,17 +31,16 @@ loadState().then(() => {
         console.log(`Health check server running on port ${PORT}`);
     });
     
-    bot.launch().catch(err => console.error("Bot ishga tushishida xato:", err));
+    bot.launch().catch(err => console.error("Bot ishga tushmadi:", err));
     console.log('Bot safely started...');
 });
 
-// Kutilmagan xatoliklar tufayli bot o'chib qolmasligi uchun himoya
 process.on('uncaughtException', (err) => {
-    console.error('Tizimli jiddiy xatolik (Bot o\'chib qolishidan saqlandi):', err);
+    console.error('Tizimli kutilmagan xatolik:', err);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('Vada bajarilmadi (Unhandled Rejection):', reason);
+    console.error('Unhandled Rejection yuz berdi:', reason);
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
