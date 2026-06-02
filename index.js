@@ -10,31 +10,39 @@ const PORT = process.env.PORT || 3000;
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Havfsizlik filtri
 bot.use(async (ctx, next) => {
     if (!ctx.from || String(ctx.from.id) !== OWNER_ID) return;
     try {
         await next();
     } catch (error) {
-        console.error("Error:", error);
+        console.error("Havfsizlik filtri ichida xatolik:", error);
     }
 });
 
-// Handlerlarni ulash
 registerHandlers(bot);
 
-// Render "Live" statusi uchun mini server
+// Cron-job uchun faqat qisqa 'OK' qaytaruvchi toza server
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is active and running!');
+    res.end('OK');
 });
 
 loadState().then(() => {
     server.listen(PORT, () => {
         console.log(`Health check server running on port ${PORT}`);
     });
-    bot.launch();
-    console.log('Bot is running safely...');
+    
+    bot.launch().catch(err => console.error("Bot ishga tushishida xato:", err));
+    console.log('Bot safely started...');
+});
+
+// Kutilmagan xatoliklar tufayli bot o'chib qolmasligi uchun himoya
+process.on('uncaughtException', (err) => {
+    console.error('Tizimli jiddiy xatolik (Bot o\'chib qolishidan saqlandi):', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Vada bajarilmadi (Unhandled Rejection):', reason);
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
