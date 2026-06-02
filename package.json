@@ -1,0 +1,13 @@
+{
+  "name": "channel-video-manager-bot",
+  "version": "1.0.0",
+  "description": "Private personal assistant bot for managing channel video episodes",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "telegraf": "^4.15.0"
+  }
+}
