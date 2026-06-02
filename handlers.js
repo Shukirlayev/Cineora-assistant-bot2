@@ -5,6 +5,7 @@ const OWNER_ID = String(process.env.OWNER_ID);
 const TELEGRAM_CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID;
 
 let waitingFor = { type: null, menuMessageId: null };
+let menuDebounceTimer = null;
 
 const getMenuText = () => {
     const s = String(state.season).padStart(2, '0');
@@ -31,31 +32,46 @@ const getMenuKeyboard = () => {
     ]);
 };
 
-// Eski menyuni toza o'chirib, har doim eng pastda yangi xabar sifatida chiqarish
 const sendMenu = async (ctx) => {
     waitingFor.type = null;
+    const chatId = ctx.chat.id;
+    const telegram = ctx.telegram;
+
     if (waitingFor.menuMessageId) {
         try {
-            await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.menuMessageId);
-        } catch (e) { /* xabar topilmasa xatolikni o'tkazib yuborish */ }
+            await telegram.deleteMessage(chatId, waitingFor.menuMessageId);
+        } catch (e) {}
     }
-    const sent = await ctx.replyWithHTML(getMenuText(), getMenuKeyboard());
-    waitingFor.menuMessageId = sent.message_id;
+    
+    try {
+        const sent = await telegram.sendMessage(chatId, getMenuText(), {
+            parse_mode: 'HTML',
+            ...getMenuKeyboard()
+        });
+        waitingFor.menuMessageId = sent.message_id;
+    } catch (err) {
+        console.error("Menyu yuborishda xatolik:", err);
+    }
 };
 
-// Bildirishnomalarni 7 soniyadan keyin avtomatik o'chirish yordamchisi
+// Guruhli videolar yuborilganda menyu chalkashmasligi uchun aqlli Debounce taymeri
+const queueMenuRefresh = (ctx, delay = 1500) => {
+    if (menuDebounceTimer) clearTimeout(menuDebounceTimer);
+    menuDebounceTimer = setTimeout(async () => {
+        await sendMenu(ctx);
+    }, delay);
+};
+
 const autoDeleteMessage = (ctx, msgId, delay = 7000) => {
     setTimeout(async () => {
         try {
             await ctx.telegram.deleteMessage(ctx.chat.id, msgId);
-        } catch (e) { /* o'chib bo'lgan bo'lsa o'tkazib yuboriladi */ }
+        } catch (e) {}
     }, delay);
 };
 
 const handleInputPrompt = async (ctx, promptText) => {
-    waitingFor.type = ctx.callbackQuery ? waitingFor.type : waitingFor.type; 
     const keyboard = Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]);
-    
     if (ctx.callbackQuery) {
         await ctx.editMessageText(promptText, { parse_mode: 'HTML', ...keyboard });
     } else {
@@ -143,11 +159,9 @@ const handleHelp = async (ctx) => {
         waitingFor.menuMessageId = null;
     }
     const helpText = `📖 <b>Botdan foydalanish qo'llanmasi:</b>\n\n` +
-        `1️⃣ <b>Shablonni sozlang:</b> Boshqaruv panelidan foydalanib Nomi, Mavsum va Shablon matnini kiriting.\n` +
-        `2️⃣ <b>Videolarni yuboring:</b> Botga videolarni ketma-ketlikda shunchaki yuboring. Nomini keyin o'zgartirsangiz ham kanalga to'g'ri nomi bilan ketadi.\n` +
-        `3️⃣ <b>Tekshirish:</b> Navbat ro'yxati yoki Ko'rinish tugmalari orqali tekshiring.\n` +
-        `4️⃣ <b>Joylash:</b> Kanalga joylash tugmasini bossangiz bot tartib bilan yuboradi va navbatni avtomat tozalaydi.\n\n` +
-        `⚙ <i>Bot faqat hisob egasi uchun ishlaydi. Har qanday bildirishnoma xabarlari 7 soniyada o'chib ketadi. Menyuingiz doimo eng pastda turadi.</i>`;
+        `1️⃣ <b>Tugmani bosing:</b> Sarlavha yozishdan oldin majburiy ravishda panelda 🎬 Nomi yoki 🧾 Doimiy Shablon tugmasini bosing, keyin matn yuboring.\n` +
+        `2️⃣ <b>Videolarni yuboring:</b> Istalgancha videolarni bittada belgilab yuboring, bot hammasini tartib bilan qabul qiladi.\n` +
+        `3️⃣ <b>Joylash:</b> Kanalga joylash tugmasi orqali tekshirib tasdiqlang.`;
     
     const sent = await ctx.replyWithHTML(helpText, Markup.inlineKeyboard([[Markup.button.callback('⬅️ Menyoga qaytish', 'action_back_to_menu')]]));
     waitingFor.menuMessageId = sent.message_id;
@@ -223,26 +237,27 @@ const registerHandlers = (bot) => {
 
     bot.on('video', async (ctx) => {
         try {
-            // Bir vaqtning o'zida yuborilgan videolarni ham xavfsiz qabul qiladi
             state.queue.push(ctx.message.video.file_id);
             await saveState();
             
             const sStr = String(state.season).padStart(2, '0');
             const eStr = String(state.queue.length).padStart(2, '0');
             
-            const sentNotif = await ctx.replyWithHTML(`✅ Video navbatga qo'shildi: <b>S${sStr}E${eStr}</b>\nJami navbatda: <b>${state.queue.length} ta</b>`);
-            autoDeleteMessage(ctx, sentNotif.message_id);
+            const sentNotif = await ctx.replyWithHTML(`✅ Video qo'shildi: <b>S${sStr}E${eStr}</b>`);
+            autoDeleteMessage(ctx, sentNotif.message_id, 5000);
             
-            // Har bitta yangi video qo'shilganda menyuni ham eng pastga tushiramiz
-            await sendMenu(ctx);
+            // Video kelganda menyuni darhol urmasdan, debounce taymeriga navbatga qo'yamiz
+            queueMenuRefresh(ctx, 1500);
         } catch (e) { console.error(e); }
     });
 
     bot.on('text', async (ctx, next) => {
         try {
+            // Agar rejim faol bo'lmasa, ogohlantirish beriladi va menyu darhol eng pastga tushadi!
             if (!waitingFor.type) {
-                const warn = await ctx.replyWithHTML('⚠️ Noma\'lum matn. Iltimos quyidagi boshqaruv panelidan foydalaning yoki /start bosing.');
-                autoDeleteMessage(ctx, warn.message_id);
+                const warn = await ctx.replyWithHTML('⚠️ <b>Xatolik:</b> Matn kiritish rejimi faol emas! Nomi yoki Shablonni o\'zgartirish uchun avval quyidagi menyudan kerakli tugmani bosing.');
+                autoDeleteMessage(ctx, warn.message_id, 8000);
+                await sendMenu(ctx);
                 return;
             }
             const text = ctx.message.text;
