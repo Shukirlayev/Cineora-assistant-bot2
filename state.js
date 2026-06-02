@@ -36,7 +36,7 @@ function generateCaption(index) {
     const s = String(state.season).padStart(2, '0');
     const e = String(index + 1).padStart(2, '0');
     
-    // Nomi va S01E01 qismlari qalin (bold) formatda bo'ladi
+    // Sarlavha yuklanish paytida joriy real vaqtdagi state.title dan olinadi
     let caption = `<b>${state.title}</b>\n<b>S${s}E${e}</b>`;
     
     if (state.template && state.template.trim() !== "") {
