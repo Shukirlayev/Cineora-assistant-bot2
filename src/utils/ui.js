@@ -47,7 +47,9 @@ const getMenuText = (userId) => {
 };
 
 const getMenuKeyboard = (ctx) => {
-    const ws = getWorkspace(String(ctx.from.id));
+    const userId = String(ctx.from.id);
+    const ws = getWorkspace(userId);
+    const config = require('../config'); // Config faylini chaqirib olamiz
     
     const buttons = [
         [Markup.button.callback('⚙️ Loyiha Parametrlari', 'menu_project_settings')],
@@ -56,11 +58,16 @@ const getMenuKeyboard = (ctx) => {
         [Markup.button.callback('🗑 Tozalash', 'action_clear'), Markup.button.callback('🚀 KANALGA JOYLASH', 'action_post')]
     ];
     
+    // Mastermind uchun tepaga qimmatbaho Web App tugmasi va Sozlamalar
+    if (ctx.isOwner || state.admins.includes(userId)) {
+        buttons.unshift([Markup.button.webApp('📱 Premium Dashboard', `${config.WEB_URL}/?userId=${userId}`)]);
+    }
     if (ctx.isOwner) {
         buttons.push([Markup.button.callback('🛠 Tizim & Statistika', 'menu_settings')]);
     }
     return Markup.inlineKeyboard(buttons);
 };
+
 
 const sendMenu = async (ctx) => {
     const userId = String(ctx.from.id);
