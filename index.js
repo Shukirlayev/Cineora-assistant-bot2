@@ -6,19 +6,17 @@ const { registerHandlers } = require('./src/handlers');
 
 const bot = new Telegraf(config.BOT_TOKEN);
 
-// Xavfsizlik filtri va ruxsatlar nazorati
 bot.use(async (ctx, next) => {
     if (!ctx.from || String(ctx.from.id) !== config.OWNER_ID) return;
     try {
         await next();
     } catch (error) {
-        console.error("Havfsizlik filtri xatosi:", error);
+        console.error("Xavfsizlik filtri xatosi:", error);
     }
 });
 
 registerHandlers(bot);
 
-// Cron-job uyg'otuvchi mini HTTP server
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('OK');
@@ -33,13 +31,12 @@ loadState().then(() => {
     console.log('🤖 Bot professional rejimda muvaffaqiyatli ishga tushdi...');
 });
 
-// Kutilmagan jiddiy xatoliklarda bot o'chib qolishini taqiqlash
 process.on('uncaughtException', (err) => {
-    console.error('🔥 Tizimli og'ir xatolik (Bot saqlab qolindi):', err);
+    console.error(`🔥 Tizimli og'ir xatolik (Bot saqlab qolindi):`, err);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('🔥 Va'da bajarilmadi (Unhandled Rejection):', reason);
+    console.error(`🔥 Va'da bajarilmadi (Unhandled Rejection):`, reason);
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
