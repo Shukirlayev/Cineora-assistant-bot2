@@ -7,18 +7,18 @@ const state = {
     workspaces: {}, 
     saved_templates: [],
     admins: [],
-    stats: { total_posts: 0, total_videos: 0 }
+    stats: { total_posts: 0, total_videos: 0, history: [] } // history qo'shildi
 };
 
 function getWorkspace(userId) {
     if (!state.workspaces[userId]) {
         state.workspaces[userId] = {
-            mode: 'serial', // 'serial' yoki 'movie'
+            mode: 'serial',
             title: "Untitled",
             season: 1,
             season_info: "",
             template: "",
-            queue: [] // Endi: [{ fileId, season, episode, mode, title, season_info, template }]
+            queue: [] 
         };
     }
     return state.workspaces[userId];
@@ -36,7 +36,10 @@ async function loadState() {
             state.workspaces = data.workspaces || {};
             state.saved_templates = Array.isArray(data.saved_templates) ? data.saved_templates : [];
             state.admins = Array.isArray(data.admins) ? data.admins : [];
-            state.stats = data.stats || { total_posts: 0, total_videos: 0 };
+            
+            // Statistikani xavfsiz yuklash
+            state.stats = data.stats || { total_posts: 0, total_videos: 0, history: [] };
+            if (!state.stats.history) state.stats.history = [];
         } else {
             await saveState();
         }
