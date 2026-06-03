@@ -1,16 +1,19 @@
-const { state, saveState } = require('../services/storage');
+const { state, saveState, getWorkspace } = require('../services/storage');
 const config = require('../config');
-const { waitingFor, autoWipe, queueMenuRefresh, sendMenu } = require('../utils/ui');
+const { getSession, autoWipe, queueMenuRefresh, sendMenu } = require('../utils/ui');
 const { Markup } = require('telegraf');
 
 function initMedia(bot) {
     bot.on('photo', async (ctx) => {
         try {
-            if (waitingFor.type === 'poster_image') {
-                waitingFor.poster.fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-                waitingFor.type = 'poster_name';
+            const userId = String(ctx.from.id);
+            const session = getSession(userId);
+            
+            if (session.waitingFor.type === 'poster_image') {
+                session.waitingFor.poster.fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+                session.waitingFor.type = 'poster_name';
                 const info = await ctx.replyWithHTML(`✅ <b>Rasm saqlandi! (2/3)</b>\nNomini yuboring:`, Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]));
-                waitingFor.promptMessageId = info.message_id; 
+                session.waitingFor.promptMessageId = info.message_id; 
                 return;
             }
             autoWipe(ctx, (await ctx.reply(`⚠️ Rasm qabul qilish rejimi faol emas.`)).message_id, 5000);
@@ -19,10 +22,14 @@ function initMedia(bot) {
 
     bot.on('video', async (ctx) => {
         try {
-            state.queue.push(ctx.message.video.file_id);
+            const userId = String(ctx.from.id);
+            const ws = getWorkspace(userId);
+            
+            ws.queue.push(ctx.message.video.file_id);
             await saveState();
-            const s = String(state.season).padStart(2, '0');
-            const e = String(state.queue.length).padStart(2, '0');
+            
+            const s = String(ws.season).padStart(2, '0');
+            const e = String(ws.queue.length).padStart(2, '0');
             autoWipe(ctx, (await ctx.replyWithHTML(`✅ Video: <b>S${s}E${e}</b>`)).message_id, 5000);
             queueMenuRefresh(ctx, 2000);
         } catch (e) { console.error(e); }
@@ -30,17 +37,19 @@ function initMedia(bot) {
 
     bot.on('text', async (ctx) => {
         try {
+            const userId = String(ctx.from.id);
+            const session = getSession(userId);
+            const ws = getWorkspace(userId);
             const text = ctx.message.text;
 
-            // --- ADMIN QO'SHISH / O'CHIRISH ---
-            if (waitingFor.type === 'add_admin') {
+            if (session.waitingFor.type === 'add_admin') {
                 if (!state.admins.includes(text)) state.admins.push(text);
                 await saveState();
                 autoWipe(ctx, (await ctx.replyWithHTML(`✅ <b>${text}</b> admin etib tayinlandi.`)).message_id, 5000);
                 await sendMenu(ctx);
                 return;
             }
-            if (waitingFor.type === 'del_admin') {
+            if (session.waitingFor.type === 'del_admin') {
                 state.admins = state.admins.filter(id => id !== text);
                 await saveState();
                 autoWipe(ctx, (await ctx.replyWithHTML(`🗑 <b>${text}</b> adminlikdan olindi.`)).message_id, 5000);
@@ -48,41 +57,39 @@ function initMedia(bot) {
                 return;
             }
 
-            // --- SHABLON MENEJERI ---
-            if (waitingFor.type === 'template_name') {
-                waitingFor.tempTemplateName = text;
-                waitingFor.type = 'template_text';
-                if (waitingFor.promptMessageId) { try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.promptMessageId); } catch(e){} }
-                const info = await ctx.replyWithHTML(`🏷 <b>"${text}"</b> shabloni uchun endi to'liq <b>matnni</b> yuboring:`, Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]));
-                waitingFor.promptMessageId = info.message_id;
+            if (session.waitingFor.type === 'template_name') {
+                session.waitingFor.tempTemplateName = text;
+                session.waitingFor.type = 'template_text';
+                if (session.waitingFor.promptMessageId) { try { await ctx.telegram.deleteMessage(ctx.chat.id, session.waitingFor.promptMessageId); } catch(e){} }
+                const info = await ctx.replyWithHTML(`🏷 <b>"${text}"</b> shabloni uchun to'liq <b>matnni</b> yuboring:`, Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]));
+                session.waitingFor.promptMessageId = info.message_id;
                 return;
             }
-            if (waitingFor.type === 'template_text') {
-                state.saved_templates.push({ name: waitingFor.tempTemplateName, text: text });
+            if (session.waitingFor.type === 'template_text') {
+                state.saved_templates.push({ name: session.waitingFor.tempTemplateName, text: text });
                 await saveState();
                 autoWipe(ctx, (await ctx.replyWithHTML(`✅ <b>Yangi shablon saqlandi!</b>`)).message_id, 5000);
                 await sendMenu(ctx);
                 return;
             }
 
-            // --- POSTER REJIMI ---
-            if (waitingFor.type === 'poster_name') {
-                waitingFor.poster.name = text;
-                waitingFor.type = 'poster_desc';
-                if (waitingFor.promptMessageId) { try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.promptMessageId); } catch(e){} }
+            if (session.waitingFor.type === 'poster_name') {
+                session.waitingFor.poster.name = text;
+                session.waitingFor.type = 'poster_desc';
+                if (session.waitingFor.promptMessageId) { try { await ctx.telegram.deleteMessage(ctx.chat.id, session.waitingFor.promptMessageId); } catch(e){} }
                 const info = await ctx.replyWithHTML(`✅ <b>Nomi olingan! (3/3)</b>\nTa'rifini (description) yuboring:`, Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]));
-                waitingFor.promptMessageId = info.message_id;
+                session.waitingFor.promptMessageId = info.message_id;
                 return;
             }
-            if (waitingFor.type === 'poster_desc') {
-                if (waitingFor.promptMessageId) { try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.promptMessageId); } catch(e){} }
-                const caption = `🎬 <b>${waitingFor.poster.name} — Seriali Uzbek Tilida</b>\n\n<blockquote>${text}</blockquote>\n\n@CineoraUz 🍿`;
+            if (session.waitingFor.type === 'poster_desc') {
+                if (session.waitingFor.promptMessageId) { try { await ctx.telegram.deleteMessage(ctx.chat.id, session.waitingFor.promptMessageId); } catch(e){} }
+                const caption = `🎬 <b>${session.waitingFor.poster.name} — Seriali Uzbek Tilida</b>\n\n<blockquote>${text}</blockquote>\n\n@CineoraUz 🍿`;
                 try {
-                    await ctx.telegram.sendPhoto(config.TELEGRAM_CHANNEL_ID, waitingFor.poster.fileId, { caption: caption, parse_mode: 'HTML' });
-                    state.stats.total_posts += 1; // Posterlar ham post statistikasiga qo'shiladi
+                    await ctx.telegram.sendPhoto(config.TELEGRAM_CHANNEL_ID, session.waitingFor.poster.fileId, { caption: caption, parse_mode: 'HTML' });
+                    state.stats.total_posts += 1; 
                     await saveState();
-                    waitingFor.type = null;
-                    autoWipe(ctx, (await ctx.replyWithHTML(`🎉 <b>Poster muvaffaqiyatli kanalga joylandi!</b>`)).message_id, 6000);
+                    session.waitingFor.type = null;
+                    autoWipe(ctx, (await ctx.replyWithHTML(`🎉 <b>Poster kanalga joylandi!</b>`)).message_id, 6000);
                     await sendMenu(ctx);
                 } catch (err) {
                     autoWipe(ctx, (await ctx.reply(`❌ Xato: ${err.message}`)).message_id, 10000);
@@ -90,32 +97,28 @@ function initMedia(bot) {
                 return;
             }
 
-            // --- ASOSIY MENYU KIRITMALARI ---
-            if (!waitingFor.type) {
+            if (!session.waitingFor.type) {
                 autoWipe(ctx, (await ctx.replyWithHTML(`⚠️ Matn kiritish rejimi faol emas!`)).message_id, 5000);
                 await sendMenu(ctx);
                 return;
             }
 
-            if (waitingFor.type === 'title') {
-                state.title = text;
+            if (session.waitingFor.type === 'title') {
+                ws.title = text;
                 autoWipe(ctx, (await ctx.replyWithHTML(`✅ Nomi yangilandi.`)).message_id, 5000);
-            } else if (waitingFor.type === 'season') {
+            } else if (session.waitingFor.type === 'season') {
                 const parsed = parseInt(text, 10);
                 if (isNaN(parsed)) return autoWipe(ctx, (await ctx.reply(`❌ Noto'g'ri raqam.`)).message_id, 5000);
-                state.season = parsed;
+                ws.season = parsed;
                 autoWipe(ctx, (await ctx.replyWithHTML(`✅ Mavsum yangilandi.`)).message_id, 5000);
-            } else if (waitingFor.type === 'season_info') {
-                state.season_info = text === '/clear' ? "" : text;
+            } else if (session.waitingFor.type === 'season_info') {
+                ws.season_info = text === '/clear' ? "" : text;
                 autoWipe(ctx, (await ctx.replyWithHTML(`✅ Izoh yangilandi.`)).message_id, 5000);
             }
 
             await saveState();
             await sendMenu(ctx);
-        } catch (e) {
-            console.error(e);
-            await sendMenu(ctx);
-        }
+        } catch (e) { console.error(e); await sendMenu(ctx); }
     });
 }
 
