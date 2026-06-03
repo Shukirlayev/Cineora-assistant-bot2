@@ -4,8 +4,6 @@ const { waitingFor, autoWipe, queueMenuRefresh, sendMenu } = require('../utils/u
 const { Markup } = require('telegraf');
 
 function initMedia(bot) {
-    
-    // RASM TUTUVCHI
     bot.on('photo', async (ctx) => {
         try {
             if (waitingFor.type === 'poster_image') {
@@ -15,7 +13,9 @@ function initMedia(bot) {
 
                 const keyboard = Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]);
                 const info = await ctx.replyWithHTML(`✅ <b>Rasm saqlandi! (2/3-qadam)</b>\n\nEndi faqat serialning <b>nomini</b> oddiy matnda yuboring.\n<i>Bot uning boshiga avtomat emoji qo'yadi va "— Seriali Uzbek Tilida" matnini qalin qilib qo'shadi.</i>\n\nMasalan: <b>Dark</b>`, keyboard);
-                autoWipe(ctx, info.message_id, 15000);
+                
+                // 1-xato yechimi: xabar o'z-o'zidan o'chmaydi, xotirada saqlanadi
+                waitingFor.promptMessageId = info.message_id; 
                 return;
             }
             const warn = await ctx.reply(`⚠️ Rasm qabul qilish rejimi faol emas.`);
@@ -23,7 +23,6 @@ function initMedia(bot) {
         } catch (e) { console.error(e); }
     });
 
-    // VIDEO TUTUVCHI
     bot.on('video', async (ctx) => {
         try {
             state.queue.push(ctx.message.video.file_id);
@@ -38,28 +37,37 @@ function initMedia(bot) {
         } catch (e) { console.error(e); }
     });
 
-    // MATN TUTUVCHI
     bot.on('text', async (ctx) => {
         try {
-            // POSTER QADAM 2: NOMINI QABUL QILISH
+            // POSTER 2-QADAM
             if (waitingFor.type === 'poster_name') {
                 waitingFor.poster.name = ctx.message.text;
                 waitingFor.type = 'poster_desc';
                 
+                // Oldingi so'rovni tozalash (ekranni toza tutish uchun)
+                if (waitingFor.promptMessageId) {
+                    try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.promptMessageId); } catch(e){}
+                }
+                
                 const keyboard = Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]);
                 const info = await ctx.replyWithHTML(`✅ <b>Nomi olingan! (3/3-qadam)</b>\n\nEndi kino ta'rifini (hikoya va statistikalarni) oddiy yuboravering.\n<i>Bot yuborgan barcha matningizni chiroyli qizil chiziqli (quote) ichiga soladi va oxiriga kanal linkini qo'shib yuklaydi!</i>`, keyboard);
-                autoWipe(ctx, info.message_id, 15000);
+                
+                waitingFor.promptMessageId = info.message_id;
                 return;
             }
 
-            // POSTER QADAM 3: DESCRIPTION VA POST QILISH
+            // POSTER 3-QADAM
             if (waitingFor.type === 'poster_desc') {
                 waitingFor.poster.desc = ctx.message.text;
+                
+                if (waitingFor.promptMessageId) {
+                    try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.promptMessageId); } catch(e){}
+                    waitingFor.promptMessageId = null;
+                }
                 
                 const name = waitingFor.poster.name;
                 const desc = waitingFor.poster.desc;
                 
-                // Siz xohlagan Super Shablon shu yerda avtomat tayyorlanadi:
                 const caption = `🎬 <b>${name} — Seriali Uzbek Tilida</b>\n\n<blockquote>${desc}</blockquote>\n\n@CineoraUz 🍿`;
 
                 try {
@@ -81,7 +89,7 @@ function initMedia(bot) {
                 return;
             }
 
-            // ODDIY REJIMLAR
+            // ODDIY MATN REJIMLARI
             if (!waitingFor.type) {
                 const warn = await ctx.replyWithHTML(`⚠️ <b>Xatolik:</b> Matn kiritish rejimi faol emas!`);
                 autoWipe(ctx, warn.message_id, 5000);
