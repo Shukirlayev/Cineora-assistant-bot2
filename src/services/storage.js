@@ -4,21 +4,21 @@ const config = require('../config');
 let collection = null;
 
 const state = {
-    workspaces: {}, // Yangi: Har bir foydalanuvchining alohida ish stoli
+    workspaces: {}, 
     saved_templates: [],
     admins: [],
     stats: { total_posts: 0, total_videos: 0 }
 };
 
-// Yangi funksiya: Adminning shaxsiy ish stolini olib beradi
 function getWorkspace(userId) {
     if (!state.workspaces[userId]) {
         state.workspaces[userId] = {
+            mode: 'serial', // 'serial' yoki 'movie'
             title: "Untitled",
             season: 1,
             season_info: "",
             template: "",
-            queue: []
+            queue: [] // Endi: [{ fileId, season, episode, mode, title, season_info, template }]
         };
     }
     return state.workspaces[userId];
