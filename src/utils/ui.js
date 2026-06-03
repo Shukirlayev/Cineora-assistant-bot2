@@ -1,7 +1,6 @@
 const { Markup } = require('telegraf');
 const { state, getWorkspace } = require('../services/storage');
 
-// Yangi: Har bir adminning vaqtinchalik xotirasi (UI Sessions)
 const sessions = {};
 
 function getSession(userId) {
@@ -22,40 +21,50 @@ function generateProgressBar(current, total) {
     return `[${bar}] ${percent}%`;
 }
 
-function generateCaption(userId, index) {
-    const ws = getWorkspace(userId);
-    const s = String(ws.season).padStart(2, '0');
-    const e = String(index + 1).padStart(2, '0');
-    let caption = `<b>${ws.title}</b>\n<b>S${s}E${e}</b>`;
-    if (ws.season_info && ws.season_info.trim() !== "") caption += `\n\n${ws.season_info}`;
-    if (ws.template && ws.template.trim() !== "") caption += `\n\n${ws.template}`;
+// Endi u indeks emas, yig'ilgan obyekt (videoMeta) qabul qiladi
+function generateCaption(videoMeta) {
+    let caption = `<b>${videoMeta.title}</b>`;
+    
+    if (videoMeta.mode === 'serial') {
+        const s = String(videoMeta.season).padStart(2, '0');
+        const e = String(videoMeta.episode).padStart(2, '0');
+        caption += `\n<b>S${s}E${e}</b>`;
+    }
+    
+    if (videoMeta.season_info && videoMeta.season_info.trim() !== "") caption += `\n\n${videoMeta.season_info}`;
+    if (videoMeta.template && videoMeta.template.trim() !== "") caption += `\n\n${videoMeta.template}`;
     return caption;
 }
 
 const getMenuText = (userId) => {
     const ws = getWorkspace(userId);
-    const s = String(ws.season).padStart(2, '0');
-    let sampleCaption = `<b>${ws.title}</b>\n<b>S${s}E01</b>`;
-    if (ws.season_info) sampleCaption += `\n\n${ws.season_info}`;
-    if (ws.template) sampleCaption += `\n\n${ws.template}`;
+    
+    // Preview uchun navbatdagi qismni hisoblaymiz
+    const nextEp = ws.queue.filter(v => v.season === ws.season).length + 1;
+    const previewMeta = {
+        title: ws.title, season: ws.season, episode: nextEp, 
+        mode: ws.mode, season_info: ws.season_info, template: ws.template
+    };
+    const sampleCaption = generateCaption(previewMeta);
 
-    return `🎛 <b>Boshqaruv Paneli (Shaxsiy Ish Stoli)</b>\n\n` +
-           `📝 <b>Joriy ko'rinish (Preview):</b>\n` +
+    return `🎛 <b>Boshqaruv Paneli</b>\n\n` +
+           `📝 <b>Navbatdagi Preview:</b>\n` +
            `----------------------------------------\n` +
            `${sampleCaption}\n` +
            `----------------------------------------\n\n` +
-           `📊 <b>Loyiha Holati:</b>\n` +
-           `• Mavsum: <code>${ws.season}</code> | Navbatda: <code>${ws.queue.length} ta</code> video`;
+           `📊 <b>Loyiha:</b> ${ws.mode === 'serial' ? `Fasl <code>${ws.season}</code> | ` : ''}Navbatda <code>${ws.queue.length} ta</code> video`;
 };
 
 const getMenuKeyboard = (ctx) => {
     const userId = String(ctx.from.id);
     const ws = getWorkspace(userId);
+    const modeText = ws.mode === 'serial' ? '🔀 Rejim: Serial' : '🔀 Rejim: Kino';
     
+    // Mutlaqo yangi va ixcham joylashuv (4 qator)
     const buttons = [
-        [Markup.button.callback('🎬 Nomi', 'action_settitle'), Markup.button.callback('📺 Fasl', 'action_setseason'), Markup.button.callback('📝 Izoh', 'action_setseasoninfo')],
-        [Markup.button.callback('🧾 Shablonlar', 'menu_templates'), Markup.button.callback('🖼 Poster', 'action_poster')],
-        [Markup.button.callback(`📋 Navbat (${ws.queue.length})`, 'action_list'), Markup.button.callback('👁 Ko\'rinish', 'action_preview'), Markup.button.callback('🗑 Tozalash', 'action_clear')],
+        [Markup.button.callback('🎬 Nom', 'action_settitle'), Markup.button.callback('📺 Fasl', 'action_setseason'), Markup.button.callback('📝 Izoh', 'action_setseasoninfo'), Markup.button.callback(modeText, 'action_switch_mode')],
+        [Markup.button.callback('🖼 Poster', 'action_poster'), Markup.button.callback('🧾 Shablonlar', 'menu_templates'), Markup.button.callback('👁 Ko\'rish', 'action_preview')],
+        [Markup.button.callback('🏁 Mavsumni Yopish', 'action_end_season'), Markup.button.callback(`📋 Navbat (${ws.queue.length})`, 'action_list'), Markup.button.callback('🗑 Tozalash', 'action_clear')],
         [Markup.button.callback('🚀 KANALGA JOYLASH', 'action_post')]
     ];
     
@@ -81,10 +90,7 @@ const sendMenu = async (ctx) => {
     }
     
     try {
-        const sent = await ctx.telegram.sendMessage(chatId, getMenuText(userId), {
-            parse_mode: 'HTML',
-            ...getMenuKeyboard(ctx)
-        });
+        const sent = await ctx.telegram.sendMessage(chatId, getMenuText(userId), { parse_mode: 'HTML', ...getMenuKeyboard(ctx) });
         session.waitingFor.menuMessageId = sent.message_id;
     } catch (err) { console.error("Menyu xatosi:", err); }
 };
