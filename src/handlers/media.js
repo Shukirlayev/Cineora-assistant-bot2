@@ -25,12 +25,23 @@ function initMedia(bot) {
             const userId = String(ctx.from.id);
             const ws = getWorkspace(userId);
             
-            ws.queue.push(ctx.message.video.file_id);
+            // Aynan shu fasldagi nechta video borligini topamiz
+            const currentEps = ws.queue.filter(v => v.season === ws.season).length + 1;
+            
+            // Videoni "Kapsula" qilib saqlaymiz (hech qachon o'zgarmaydi)
+            ws.queue.push({
+                fileId: ctx.message.video.file_id,
+                mode: ws.mode,
+                title: ws.title,
+                season: ws.season,
+                episode: currentEps,
+                season_info: ws.season_info,
+                template: ws.template
+            });
             await saveState();
             
-            const s = String(ws.season).padStart(2, '0');
-            const e = String(ws.queue.length).padStart(2, '0');
-            autoWipe(ctx, (await ctx.replyWithHTML(`✅ Video: <b>S${s}E${e}</b>`)).message_id, 5000);
+            const replyTxt = ws.mode === 'serial' ? `✅ S${String(ws.season).padStart(2, '0')}E${String(currentEps).padStart(2, '0')} tayyor.` : `✅ Kino videosi qabul qilindi.`;
+            autoWipe(ctx, (await ctx.replyWithHTML(replyTxt)).message_id, 5000);
             queueMenuRefresh(ctx, 2000);
         } catch (e) { console.error(e); }
     });
@@ -52,7 +63,7 @@ function initMedia(bot) {
             if (session.waitingFor.type === 'del_admin') {
                 state.admins = state.admins.filter(id => id !== text);
                 await saveState();
-                autoWipe(ctx, (await ctx.replyWithHTML(`🗑 <b>${text}</b> adminlikdan olindi.`)).message_id, 5000);
+                autoWipe(ctx, (await ctx.replyWithHTML(`🗑 <b>${text}</b> o'chirildi.`)).message_id, 5000);
                 await sendMenu(ctx);
                 return;
             }
@@ -61,14 +72,14 @@ function initMedia(bot) {
                 session.waitingFor.tempTemplateName = text;
                 session.waitingFor.type = 'template_text';
                 if (session.waitingFor.promptMessageId) { try { await ctx.telegram.deleteMessage(ctx.chat.id, session.waitingFor.promptMessageId); } catch(e){} }
-                const info = await ctx.replyWithHTML(`🏷 <b>"${text}"</b> shabloni uchun to'liq <b>matnni</b> yuboring:`, Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]));
+                const info = await ctx.replyWithHTML(`🏷 <b>"${text}"</b> shabloni uchun matnni yuboring:`, Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]));
                 session.waitingFor.promptMessageId = info.message_id;
                 return;
             }
             if (session.waitingFor.type === 'template_text') {
                 state.saved_templates.push({ name: session.waitingFor.tempTemplateName, text: text });
                 await saveState();
-                autoWipe(ctx, (await ctx.replyWithHTML(`✅ <b>Yangi shablon saqlandi!</b>`)).message_id, 5000);
+                autoWipe(ctx, (await ctx.replyWithHTML(`✅ <b>Shablon saqlandi!</b>`)).message_id, 5000);
                 await sendMenu(ctx);
                 return;
             }
@@ -77,7 +88,7 @@ function initMedia(bot) {
                 session.waitingFor.poster.name = text;
                 session.waitingFor.type = 'poster_desc';
                 if (session.waitingFor.promptMessageId) { try { await ctx.telegram.deleteMessage(ctx.chat.id, session.waitingFor.promptMessageId); } catch(e){} }
-                const info = await ctx.replyWithHTML(`✅ <b>Nomi olingan! (3/3)</b>\nTa'rifini (description) yuboring:`, Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]));
+                const info = await ctx.replyWithHTML(`✅ <b>Nomi olingan! (3/3)</b>\nTa'rifini yuboring:`, Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]));
                 session.waitingFor.promptMessageId = info.message_id;
                 return;
             }
