@@ -25,10 +25,7 @@ function initMedia(bot) {
             const userId = String(ctx.from.id);
             const ws = getWorkspace(userId);
             
-            // Aynan shu fasldagi nechta video borligini topamiz
             const currentEps = ws.queue.filter(v => v.season === ws.season).length + 1;
-            
-            // Videoni "Kapsula" qilib saqlaymiz (hech qachon o'zgarmaydi)
             ws.queue.push({
                 fileId: ctx.message.video.file_id,
                 mode: ws.mode,
@@ -97,7 +94,17 @@ function initMedia(bot) {
                 const caption = `🎬 <b>${session.waitingFor.poster.name} — Seriali Uzbek Tilida</b>\n\n<blockquote>${text}</blockquote>\n\n@CineoraUz 🍿`;
                 try {
                     await ctx.telegram.sendPhoto(config.TELEGRAM_CHANNEL_ID, session.waitingFor.poster.fileId, { caption: caption, parse_mode: 'HTML' });
+                    
                     state.stats.total_posts += 1; 
+                    // Poster ham statistikaga tushadi
+                    state.stats.history.unshift({
+                        type: 'poster',
+                        title: session.waitingFor.poster.name,
+                        admin: userId,
+                        date: new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent', hour12: false })
+                    });
+                    if (state.stats.history.length > 50) state.stats.history.pop();
+
                     await saveState();
                     session.waitingFor.type = null;
                     autoWipe(ctx, (await ctx.replyWithHTML(`🎉 <b>Poster kanalga joylandi!</b>`)).message_id, 6000);
