@@ -3,6 +3,28 @@ const config = require('../config');
 const { getSession, autoWipe, queueMenuRefresh, sendMenu } = require('../utils/ui');
 const { Markup } = require('telegraf');
 
+// Video kiritish konveyer qismi (2-muammo yechimi: helper holatiga olindi)
+async function handleVideoInput(ctx, fileId) {
+    const userId = String(ctx.from.id);
+    const ws = getWorkspace(userId);
+    
+    const currentEps = ws.queue.filter(v => v.season === ws.season).length + 1;
+    ws.queue.push({
+        fileId: fileId,
+        mode: ws.mode,
+        title: ws.title,
+        season: ws.season,
+        episode: currentEps,
+        season_info: ws.season_info,
+        template: ws.template
+    });
+    await saveState();
+    
+    const replyTxt = ws.mode === 'serial' ? `✅ S${String(ws.season).padStart(2, '0')}E${String(currentEps).padStart(2, '0')} tayyor.` : `✅ Kino videosi qabul qilindi.`;
+    autoWipe(ctx, (await ctx.replyWithHTML(replyTxt)).message_id, 5000);
+    queueMenuRefresh(ctx, 2000);
+}
+
 function initMedia(bot) {
     bot.on('photo', async (ctx) => {
         try {
@@ -20,26 +42,23 @@ function initMedia(bot) {
         } catch (e) { console.error(e); }
     });
 
+    // 2-MUAMMO YECHIMI: .mkv hujjat ko'rinishidagi o'ta sifatli videolarni qabul qilish
+    bot.on('document', async (ctx) => {
+        try {
+            const doc = ctx.message.document;
+            const mime = doc.mime_type || '';
+            const name = doc.file_name || '';
+            
+            if (mime.startsWith('video/') || name.endsWith('.mkv') || name.endsWith('.mp4') || name.endsWith('.avi') || name.endsWith('.mov')) {
+                return await handleVideoInput(ctx, doc.file_id);
+            }
+            autoWipe(ctx, (await ctx.reply(`⚠️ Bu fayl video formatida emas.`)).message_id, 5000);
+        } catch (e) { console.error(e); }
+    });
+
     bot.on('video', async (ctx) => {
         try {
-            const userId = String(ctx.from.id);
-            const ws = getWorkspace(userId);
-            
-            const currentEps = ws.queue.filter(v => v.season === ws.season).length + 1;
-            ws.queue.push({
-                fileId: ctx.message.video.file_id,
-                mode: ws.mode,
-                title: ws.title,
-                season: ws.season,
-                episode: currentEps,
-                season_info: ws.season_info,
-                template: ws.template
-            });
-            await saveState();
-            
-            const replyTxt = ws.mode === 'serial' ? `✅ S${String(ws.season).padStart(2, '0')}E${String(currentEps).padStart(2, '0')} tayyor.` : `✅ Kino videosi qabul qilindi.`;
-            autoWipe(ctx, (await ctx.replyWithHTML(replyTxt)).message_id, 5000);
-            queueMenuRefresh(ctx, 2000);
+            await handleVideoInput(ctx, ctx.message.video.file_id);
         } catch (e) { console.error(e); }
     });
 
@@ -89,29 +108,25 @@ function initMedia(bot) {
                 session.waitingFor.promptMessageId = info.message_id;
                 return;
             }
+            
+            // 3-MUAMMO YECHIMI: Posterni kanalga otishdan avval JONLI PREVIEW va tasdiq oynasi
             if (session.waitingFor.type === 'poster_desc') {
                 if (session.waitingFor.promptMessageId) { try { await ctx.telegram.deleteMessage(ctx.chat.id, session.waitingFor.promptMessageId); } catch(e){} }
+                
                 const caption = `🎬 <b>${session.waitingFor.poster.name} — Seriali Uzbek Tilida</b>\n\n<blockquote>${text}</blockquote>\n\n@CineoraUz 🍿`;
-                try {
-                    await ctx.telegram.sendPhoto(config.TELEGRAM_CHANNEL_ID, session.waitingFor.poster.fileId, { caption: caption, parse_mode: 'HTML' });
-                    
-                    state.stats.total_posts += 1; 
-                    // Poster ham statistikaga tushadi
-                    state.stats.history.unshift({
-                        type: 'poster',
-                        title: session.waitingFor.poster.name,
-                        admin: userId,
-                        date: new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent', hour12: false })
-                    });
-                    if (state.stats.history.length > 50) state.stats.history.pop();
-
-                    await saveState();
-                    session.waitingFor.type = null;
-                    autoWipe(ctx, (await ctx.replyWithHTML(`🎉 <b>Poster kanalga joylandi!</b>`)).message_id, 6000);
-                    await sendMenu(ctx);
-                } catch (err) {
-                    autoWipe(ctx, (await ctx.reply(`❌ Xato: ${err.message}`)).message_id, 10000);
-                }
+                session.waitingFor.poster.finalCaption = caption;
+                session.waitingFor.type = 'poster_confirm';
+                
+                // Admin chatiga rasmni o'zini tekst bilan chiqarib beramiz! (Apple darajasidagi UX)
+                const previewMsg = await ctx.replyWithPhoto(session.waitingFor.poster.fileId, {
+                    caption: `👁 <b>POSTER PREVIEW (Tasdiqlash qadami):</b>\n\n${caption}\n\n⚠️ Kanalga joylashni tasdiqlaysizmi?`,
+                    parse_mode: 'HTML',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('🚀 TASDIQLASH & JOYLASH', 'confirm_poster_send')],
+                        [Markup.button.callback('❌ BEKOR QILISH', 'action_cancel_input')]
+                    ])
+                });
+                session.waitingFor.promptMessageId = previewMsg.message_id;
                 return;
             }
 
@@ -130,7 +145,7 @@ function initMedia(bot) {
                 ws.season = parsed;
                 autoWipe(ctx, (await ctx.replyWithHTML(`✅ Mavsum yangilandi.`)).message_id, 5000);
             } else if (session.waitingFor.type === 'season_info') {
-                ws.season_info = text === '/clear' ? "" : text;
+                ws.season_info = text === '/clear' ? '' : text;
                 autoWipe(ctx, (await ctx.replyWithHTML(`✅ Izoh yangilandi.`)).message_id, 5000);
             }
 
