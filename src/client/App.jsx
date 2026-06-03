@@ -1,28 +1,37 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { GripVertical, Trash2, Rocket, Film, Tv, LayoutGrid, FileText, Check, AlertCircle, RefreshCw } from 'lucide-react';
+import { GripVertical, Trash2, Rocket, Search, Smartphone, ShieldCheck, Undo2, PlayCircle, Settings, CheckCircle2, Loader2, Info } from 'lucide-react';
 
 export default function App() {
   const [userId, setUserId] = useState(null);
   const [ws, setWs] = useState(null);
   const [queue, setQueue] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [templates, setTemplates] = useState([]);
   
   const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState(false);
-  const [posting, setPosting] = useState(false);
+  const [pin, setPin] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false); // D2: PIN LOCK
 
-  // Form states
-  const [title, setTitle] = useState('');
-  const [season, setSeason] = useState(1);
-  const [activeTpl, setActiveTpl] = useState('');
+  // Modules State
+  const [searchQuery, setSearchQuery] = useState(''); // A4: Search
+  const [previewOpen, setPreviewOpen] = useState(false); // A2: Bottom Sheet Preview
+  const [lastDeleted, setLastDeleted] = useState(null); // D1: Undo
+  const [uploadStatus, setUploadStatus] = useState({ isUploading: false }); // C1: Badges
 
-  const triggerHaptic = (type = 'light') => {
-    if (window.Telegram?.WebApp?.HapticFeedback) {
-      window.Telegram.WebApp.HapticFeedback.impactOccurred(type);
+  const triggerHaptic = (type = 'light') => window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(type);
+
+  // Poll status every 3 seconds if uploading
+  useEffect(() => {
+    let interval;
+    if (uploadStatus.isUploading && userId) {
+      interval = setInterval(() => {
+        fetch(`/api/workspace/${userId}/status`).then(res => res.json()).then(data => {
+          setUploadStatus(data.uploadStatus);
+          if (!data.uploadStatus.isUploading) loadData(userId); // Refresh queue when done
+        });
+      }, 3000);
     }
-  };
+    return () => clearInterval(interval);
+  }, [uploadStatus.isUploading, userId]);
 
   const loadData = (uid) => {
     fetch(`/api/workspace/${uid}`)
@@ -31,309 +40,290 @@ export default function App() {
         if (data.success) {
           setWs(data.workspace);
           setQueue(data.workspace.queue);
-          setStats(data.stats);
-          setTemplates(data.saved_templates);
-          setTitle(data.workspace.title);
-          setSeason(data.workspace.season);
-          setActiveTpl(data.workspace.template || '');
+          setUploadStatus(data.workspace.uploadStatus || { isUploading: false });
         }
         setLoading(false);
-      })
-      .catch(() => setLoading(false));
+      }).catch(() => setLoading(false));
   };
 
   useEffect(() => {
     const tg = window.Telegram.WebApp;
     tg.ready();
     tg.expand();
+    tg.setBackgroundColor('#1C1C1E'); // Space Gray bg for telegram header
+    tg.setHeaderColor('#1C1C1E');
+    
     const uid = tg.initDataUnsafe?.user?.id || new URLSearchParams(window.location.search).get('userId');
     setUserId(uid);
     if (uid) loadData(uid);
   }, []);
 
-  // 1. Drag and Drop Saqlash Tizimi
+  // --- D2: PIN KOD MANTIQ ---
+  const handlePinInput = (num) => {
+    triggerHaptic('light');
+    if (pin.length < 4) {
+      const newPin = pin + num;
+      setPin(newPin);
+      if (newPin === '0000') { // Default PIN
+        triggerHaptic('heavy');
+        setIsAuthenticated(true);
+      } else if (newPin.length === 4) {
+        triggerHaptic('medium');
+        setTimeout(() => setPin(''), 400); // Xato bo'lsa tozalash
+      }
+    }
+  };
+
+  // --- A1 & A3: Saqlash ---
+  const saveParam = async (field, value) => {
+    const body = {}; body[field] = value;
+    await fetch(`/api/workspace/${userId}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    setWs(prev => ({ ...prev, [field]: value }));
+  };
+
+  // --- A4: Qidiruv Filtrlash ---
+  const filteredQueue = queue.filter(v => v.title?.toLowerCase().includes(searchQuery.toLowerCase()) || v.season?.toString().includes(searchQuery));
+
+  // --- D1: O'chirish va Bekor Qilish ---
+  const handleDelete = async (index) => {
+    triggerHaptic('medium');
+    const itemToDel = queue[index];
+    setLastDeleted({ item: itemToDel, originalIndex: index }); // Xotirada saqlash
+    
+    const updated = queue.filter((_, i) => i !== index);
+    setQueue(updated);
+    await fetch(`/api/workspace/${userId}/queue/${index}`, { method: 'DELETE' });
+    
+    // 5 soniyadan keyin Undo yo'qoladi
+    setTimeout(() => setLastDeleted(null), 5000); 
+  };
+
+  const handleUndo = async () => {
+    if (!lastDeleted) return;
+    triggerHaptic('heavy');
+    const { item, originalIndex } = lastDeleted;
+    
+    const updated = [...queue];
+    updated.splice(originalIndex, 0, item);
+    setQueue(updated);
+    setLastDeleted(null);
+
+    await fetch(`/api/workspace/${userId}/queue/restore`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ item, index: originalIndex }) 
+    });
+  };
+
   const onDragEnd = async (result) => {
     if (!result.destination) return;
     triggerHaptic('light');
-    
     const items = Array.from(queue);
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
     setQueue(items);
-
-    fetch(`/api/workspace/${userId}/reorder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newQueue: items })
-    });
+    await fetch(`/api/workspace/${userId}/reorder`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ newQueue: items }) });
   };
 
-  // 2. Elementni O'chirish
-  const handleDelete = async (index) => {
-    triggerHaptic('medium');
-    const updated = queue.filter((_, i) => i !== index);
-    setQueue(updated);
-
-    fetch(`/api/workspace/${userId}/queue/${index}`, { method: 'DELETE' });
-  };
-
-  // 3. Parametrlarni Avtomat Saqlash (Flat Blur Inputs)
-  const saveParam = async (field, value) => {
-    setUpdating(true);
-    const body = {};
-    body[field] = value;
-
-    const res = await fetch(`/api/workspace/${userId}/update`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    const data = await res.json();
-    if (data.success) {
-      setWs(data.workspace);
-    }
-    setUpdating(false);
-  };
-
-  // 4. Kanalga Joylashni Boshlash Triggeli
-  const handlePostToChannel = async () => {
-    if (queue.length === 0 || posting) return;
+  const handlePost = async () => {
+    if (queue.length === 0 || uploadStatus.isUploading) return;
     triggerHaptic('heavy');
-    setPosting(true);
-
-    const res = await fetch(`/api/workspace/${userId}/post`, { method: 'POST' });
-    const data = await res.json();
-    
-    if (data.success) {
-      if (window.Telegram?.WebApp?.showPopup) {
-        window.Telegram.WebApp.showPopup({
-          title: 'Konveyer Ishga Tushdi 🚀',
-          message: `Jami ${queue.length} ta video fonda yuklanmoqda. Bot sahifasini yopishingiz mumkin, tizim o'zi avtomat hammasini yakunlaydi.`,
-          buttons: [{ type: 'ok' }]
-        });
-      }
-      setQueue([]);
-    }
-    setPosting(false);
+    setUploadStatus({ isUploading: true, statusText: 'Boshlanmoqda...' });
+    await fetch(`/api/workspace/${userId}/post`, { method: 'POST' });
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center gap-3">
-        <div className="w-8 h-8 border-[2px] border-zinc-700 border-t-white rounded-full animate-spin"></div>
-        <p className="text-[11px] uppercase tracking-widest text-zinc-500 font-bold animate-pulse">Loading Matrix</p>
-      </div>
-    );
-  }
+  // --- EKRANLAR ---
+  if (loading) return <div className="min-h-screen bg-[#1C1C1E] flex items-center justify-center"><Loader2 className="w-8 h-8 text-[#0A84FF] animate-spin" /></div>;
 
-  if (!ws) {
+  // D2: PIN Ekran (Lock Screen)
+  if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6 text-center">
-        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-2xl backdrop-blur-md max-w-xs">
-          <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-3" />
-          <p className="text-sm text-zinc-400 font-medium">Sessiya tasdiqlanmadi. Kirish taqiqlangan.</p>
+      <div className="min-h-screen bg-[#1C1C1E] text-[#F2F2F7] flex flex-col items-center justify-center p-6">
+        <ShieldCheck className="w-12 h-12 text-[#0A84FF] mb-6" />
+        <h2 className="text-xl font-medium mb-8 tracking-wide">Enter PIN to Access</h2>
+        <div className="flex gap-4 mb-10">
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className={`w-4 h-4 rounded-full border-2 transition-all ${pin.length > i ? 'bg-[#0A84FF] border-[#0A84FF]' : 'border-[#3A3A3C]'}`} />
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-6">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+            <button key={num} onClick={() => handlePinInput(num.toString())} className="w-16 h-16 rounded-full bg-[#2C2C2E] text-2xl font-medium active:bg-[#3A3A3C] transition-colors">
+              {num}
+            </button>
+          ))}
+          <div />
+          <button onClick={() => handlePinInput('0')} className="w-16 h-16 rounded-full bg-[#2C2C2E] text-2xl font-medium active:bg-[#3A3A3C] transition-colors">0</button>
+          <button onClick={() => setPin(pin.slice(0, -1))} className="w-16 h-16 rounded-full flex items-center justify-center text-[#FF453A] active:bg-[#3A3A3C] transition-colors text-lg font-medium">Del</button>
         </div>
       </div>
     );
   }
 
+  // --- ASOSIY STUDIO DASHBOARD (Space Gray) ---
   return (
-    <div className="min-h-screen bg-[#000000] text-white p-5 font-sans pb-36 selection:bg-zinc-800 overflow-x-hidden">
+    <div className="min-h-screen bg-[#1C1C1E] text-[#F2F2F7] font-sans pb-40 overflow-x-hidden selection:bg-[#0A84FF]/30">
       
-      {/* SECTION 1: HEADER (Apple Minimalist Branding) */}
-      <div className="flex justify-between items-center mb-6 pt-2 border-b border-zinc-900 pb-4">
+      {/* Header & Status (C1) */}
+      <div className="sticky top-0 z-40 bg-[#1C1C1E]/90 backdrop-blur-xl border-b border-[#3A3A3C]/50 px-5 pt-4 pb-3 flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
-            CINEORA <span className="text-[10px] text-zinc-600 font-mono tracking-normal bg-zinc-900 px-1.5 py-0.5 rounded">V2</span>
-          </h1>
-          <p className="text-[11px] text-zinc-500 font-medium tracking-wide mt-0.5">ADMIN STUDIO CONTROL</p>
+          <h1 className="text-xl font-semibold tracking-tight">Studio Control</h1>
+          <p className="text-xs text-[#8E8E93] mt-0.5">Cineora Workspace</p>
         </div>
+        {uploadStatus.isUploading ? (
+          <div className="flex items-center gap-2 bg-[#0A84FF]/10 text-[#0A84FF] px-3 py-1.5 rounded-full border border-[#0A84FF]/20">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <span className="text-[11px] font-bold tracking-wide">{uploadStatus.statusText}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 bg-[#32D74B]/10 text-[#32D74B] px-3 py-1.5 rounded-full">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span className="text-[11px] font-bold">System Ready</span>
+          </div>
+        )}
+      </div>
+
+      <div className="p-5 space-y-6">
         
-        {/* State Indicator */}
-        <div className="flex items-center gap-2 bg-zinc-900/60 border border-zinc-800/60 px-3 py-1.5 rounded-full backdrop-blur-md">
-          <div className={`w-2 h-2 rounded-full ${updating ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></div>
-          <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
-            {updating ? 'Saving' : 'Sync'}
-          </span>
-        </div>
-      </div>
-
-      {/* SECTION 2: DIGITAL WALL STATS (Stripe Typography) */}
-      <div className="grid grid-cols-2 gap-3.5 mb-7">
-        <div className="bg-gradient-to-br from-[#0c0c0e] to-[#080809] border border-zinc-800/40 p-4 rounded-2xl relative group">
-          <p className="text-[10px] text-zinc-500 mb-1 font-bold tracking-widest uppercase">Buffer Queue</p>
-          <div className="flex items-baseline gap-1">
-            <p className="text-3xl font-light tracking-tight text-white">{queue.length}</p>
-            <p className="text-xs text-zinc-600 font-medium font-mono">items</p>
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-[#0c0c0e] to-[#080809] border border-zinc-800/40 p-4 rounded-2xl relative">
-          <p className="text-[10px] text-zinc-500 mb-1 font-bold tracking-widest uppercase">Historical Log</p>
-          <div className="flex items-baseline gap-1">
-            <p className="text-3xl font-light tracking-tight text-white">{stats.total_videos}</p>
-            <p className="text-xs text-zinc-600 font-medium font-mono">clips</p>
-          </div>
-        </div>
-      </div>
-
-      {/* SECTION 3: CORE PARAMETERS (Premium Form Control) */}
-      <div className="bg-[#09090b] border border-zinc-900 rounded-2xl p-4 space-y-4 mb-7 shadow-2xl relative">
-        <div className="flex items-center gap-2 text-zinc-400 text-xs font-bold tracking-wider uppercase mb-1 border-b border-zinc-900 pb-2">
-          <LayoutGrid className="w-3.5 h-3.5 text-zinc-500" />
-          <span>Loyiha Arxitekturasi</span>
-        </div>
-
-        {/* Flat Input - Title */}
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider pl-0.5">Asar Nomi</label>
+        {/* A4: Smart Search Bar */}
+        <div className="relative">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8E8E93]" />
           <input 
             type="text" 
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={(e) => saveParam('title', e.target.value)}
-            className="w-full bg-black border border-zinc-800 rounded-xl px-3.5 py-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 transition-all font-medium"
-            placeholder="Untitled Project"
+            placeholder="Qidiruv (Kino nomi yoki fasl)..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-[#2C2C2E] border border-[#3A3A3C] text-sm rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:border-[#0A84FF] transition-colors"
           />
         </div>
 
-        {/* Mode Selector Switch (Premium Segmented Control) */}
-        <div className="grid grid-cols-2 gap-1.5 bg-black p-1 rounded-xl border border-zinc-800/80">
-          <button 
-            onClick={() => { triggerHaptic('light'); saveParam('mode', 'serial'); }}
-            className={`flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg transition-all ${ws.mode === 'serial' ? 'bg-zinc-900 text-white border border-zinc-800 shadow-xl' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            <Tv className="w-3.5 h-3.5" /> Serial Mode
-          </button>
-          <button 
-            onClick={() => { triggerHaptic('light'); saveParam('mode', 'movie'); }}
-            className={`flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg transition-all ${ws.mode === 'movie' ? 'bg-zinc-900 text-white border border-zinc-800 shadow-xl' : 'text-zinc-500 hover:text-zinc-300'}`}
-          >
-            <Film className="w-3.5 h-3.5" /> Movie Mode
-          </button>
-        </div>
-
-        {/* Conditionally Render Season - Inline Flow */}
-        {ws.mode === 'serial' && (
-          <div className="space-y-1.5 pt-1">
-            <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider pl-0.5">Joriy Mavsum (Fasl)</label>
+        {/* C3 & Meta: Loyiha Sozlamalari (A3 Watermark bilan) */}
+        <div className="bg-[#2C2C2E] border border-[#3A3A3C] rounded-2xl p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-medium text-[#8E8E93]">Loyiha Nomi (TMDB Auto-fetch)</span>
+            <button className="text-[11px] text-[#0A84FF] bg-[#0A84FF]/10 px-2.5 py-1 rounded-md font-medium active:scale-95">TMDB izlash</button>
+          </div>
+          <input 
+            type="text" value={ws.title || ''} 
+            onChange={(e) => setWs({...ws, title: e.target.value})} onBlur={(e) => saveParam('title', e.target.value)}
+            className="w-full bg-[#1C1C1E] border border-[#3A3A3C] rounded-lg px-3 py-2.5 text-[15px] focus:outline-none focus:border-[#0A84FF]"
+          />
+          
+          <div className="border-t border-[#3A3A3C] pt-3">
+            <span className="text-[13px] font-medium text-[#8E8E93] mb-2 block">Kanalingiz Watermarki (Havola)</span>
             <input 
-              type="number" 
-              value={season}
-              onChange={(e) => setSeason(e.target.value)}
-              onBlur={(e) => saveParam('season', e.target.value)}
-              className="w-full bg-black border border-zinc-800 rounded-xl px-3.5 py-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 transition-all font-mono font-bold"
+              type="text" placeholder="@CineoraUz - Obuna bo'ling!" value={ws.watermark || ''} 
+              onChange={(e) => setWs({...ws, watermark: e.target.value})} onBlur={(e) => saveParam('watermark', e.target.value)}
+              className="w-full bg-[#1C1C1E] border border-[#3A3A3C] rounded-lg px-3 py-2 text-[13px] focus:outline-none text-[#0A84FF]"
             />
           </div>
-        )}
+        </div>
 
-        {/* Template Selector (Custom Minimal Dropdown replacement) */}
-        <div className="space-y-1.5 pt-1">
-          <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider pl-0.5">Faol Matn Shablonlari</label>
-          <div className="flex flex-wrap gap-1.5">
-            {templates.map((tpl, idx) => {
-              const isSelected = activeTpl === tpl.text;
-              return (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    triggerHaptic('light');
-                    const nextTpl = isSelected ? '' : tpl.text;
-                    setActiveTpl(nextTpl);
-                    saveParam('template', nextTpl);
-                  }}
-                  className={`text-xs px-3 py-2 rounded-xl border font-medium transition-all flex items-center gap-1.5 ${isSelected ? 'bg-white text-black border-white font-bold' : 'bg-black text-zinc-400 border-zinc-800 hover:border-zinc-700'}`}
-                >
-                  <FileText className="w-3 h-3" />
-                  {tpl.name}
-                  {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                </button>
-              );
-            })}
-            {templates.length === 0 && (
-              <p className="text-xs text-zinc-600 italic p-1">Botda saqlangan shablonlar topilmadi.</p>
-            )}
+        {/* Queue List */}
+        <div>
+          <div className="flex justify-between items-end mb-3 px-1">
+            <h2 className="text-[15px] font-semibold text-[#F2F2F7]">Yuklash Navbati ({filteredQueue.length})</h2>
+            <button onClick={() => {triggerHaptic('light'); setPreviewOpen(true);}} className="flex items-center gap-1.5 text-[12px] text-[#0A84FF] font-medium">
+              <Smartphone className="w-3.5 h-3.5" /> Jonli Preview
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <DragDropContext onDragEnd={onDragEnd}>
+              <Droppable droppableId="q">
+                {(provided) => (
+                  <div {...provided.droppableProps} ref={provided.innerRef}>
+                    {filteredQueue.map((video, index) => (
+                      <Draggable key={`v-${index}`} draggableId={`v-${index}`} index={index} isDragDisabled={searchQuery.length > 0}>
+                        {(provided, snapshot) => (
+                          <div
+                            ref={provided.innerRef} {...provided.draggableProps}
+                            className={`flex items-center justify-between p-3.5 rounded-xl mb-2 transition-all ${snapshot.isDragging ? 'bg-[#3A3A3C] shadow-2xl scale-[1.02] border-[#0A84FF]/50' : 'bg-[#2C2C2E] border border-[#3A3A3C]'}`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div {...provided.dragHandleProps} className="p-1 text-[#8E8E93] active:text-[#F2F2F7]">
+                                <GripVertical className="w-4 h-4" />
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-[15px] font-semibold">{video.mode === 'serial' ? `S${String(video.season).padStart(2,'0')}E${String(video.episode).padStart(2,'0')}` : 'Kino'}</span>
+                                {/* A3: Asset Info Fake Meta */}
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span className="text-[11px] text-[#8E8E93] truncate max-w-[130px]">{video.title || ws.title}</span>
+                                  <span className="w-1 h-1 rounded-full bg-[#3A3A3C]"></span>
+                                  <span className="text-[10px] font-mono text-[#8E8E93]">1080p • MKV</span>
+                                </div>
+                              </div>
+                            </div>
+                            <button onClick={() => handleDelete(index)} className="p-2 text-[#FF453A]/80 hover:bg-[#FF453A]/10 rounded-lg transition-colors">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            </DragDropContext>
+          </div>
+        </div>
+
+      </div>
+
+      {/* D1: GLOBAL UNDO SNACKBAR */}
+      {lastDeleted && (
+        <div className="fixed bottom-[90px] left-5 right-5 bg-[#3A3A3C]/95 backdrop-blur-md border border-[#48484A] p-3 rounded-xl shadow-2xl flex justify-between items-center z-40 animate-in slide-in-from-bottom-5">
+          <div className="flex items-center gap-2 text-sm text-[#F2F2F7]">
+            <Info className="w-4 h-4 text-[#0A84FF]" /> 1 ta qism o'chirildi
+          </div>
+          <button onClick={handleUndo} className="flex items-center gap-1.5 text-sm font-bold text-[#0A84FF] active:scale-95">
+            <Undo2 className="w-4 h-4" /> Qaytarish
+          </button>
+        </div>
+      )}
+
+      {/* FIXED ACTION BUTTON */}
+      <div className="fixed bottom-0 left-0 w-full p-5 bg-gradient-to-t from-[#1C1C1E] via-[#1C1C1E]/95 to-transparent z-30">
+        <button 
+          onClick={handlePost}
+          disabled={queue.length === 0 || uploadStatus.isUploading}
+          className={`w-full py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 text-[15px] transition-transform active:scale-[0.98] ${queue.length === 0 || uploadStatus.isUploading ? 'bg-[#2C2C2E] text-[#8E8E93]' : 'bg-[#0A84FF] text-white shadow-lg shadow-[#0A84FF]/20'}`}
+        >
+          <Rocket className="w-4 h-4" /> {uploadStatus.isUploading ? 'Yuklanmoqda...' : 'Kanalga Joylash'}
+        </button>
+      </div>
+
+      {/* A2: BOTTOM SHEET (LIVE PREVIEW) */}
+      <div className={`fixed inset-0 z-50 transition-opacity duration-300 ${previewOpen ? 'bg-black/60 pointer-events-auto' : 'bg-transparent pointer-events-none'}`} onClick={() => setPreviewOpen(false)}>
+        <div 
+          className={`absolute bottom-0 left-0 w-full h-[75vh] bg-[#1C1C1E] rounded-t-3xl transition-transform duration-300 ease-out flex flex-col ${previewOpen ? 'translate-y-0' : 'translate-y-full'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex justify-center p-3"><div className="w-12 h-1.5 bg-[#3A3A3C] rounded-full" /></div>
+          <div className="px-5 pb-2 border-b border-[#3A3A3C] flex justify-between items-center">
+            <h3 className="font-semibold text-[#F2F2F7]">Telegram Simulyator</h3>
+            <button onClick={() => setPreviewOpen(false)} className="text-[#0A84FF] text-sm font-medium">Yopish</button>
+          </div>
+          <div className="p-5 flex-1 overflow-y-auto bg-black/20">
+            {/* Telegram Message Bubble Fake */}
+            <div className="bg-[#2C2C2E] rounded-2xl rounded-bl-sm p-3 max-w-[85%] border border-[#3A3A3C]/50 shadow-sm relative">
+              <div className="w-full h-32 bg-black rounded-lg flex items-center justify-center mb-2">
+                <PlayCircle className="w-8 h-8 text-white/50" />
+              </div>
+              <p className="text-[14px] text-[#F2F2F7] leading-relaxed whitespace-pre-wrap">
+                🎬 <b>{ws.title || 'Kino nomi'}</b><br/>
+                📺 Fasl: {ws.season} • Qism: {queue[0]?.episode || '01'}<br/><br/>
+                <i>{ws.template || 'Qo\'shimcha ma\'lumotlar...'}</i>
+                <br/><br/>
+                <span className="text-[#0A84FF]">{ws.watermark || '@CineoraUz'}</span>
+              </p>
+              <span className="text-[10px] text-[#8E8E93] absolute bottom-2 right-3">12:00</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* SECTION 4: DYNAMIC DRAG-AND-DROP CANVAS */}
-      <div className="mb-4 flex justify-between items-center px-1">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-400">Konveyer Tizimi</h2>
-        <span className="text-[10px] font-mono text-zinc-600 font-bold uppercase">Hold & Slide</span>
-      </div>
-
-      <div className="space-y-2.5">
-        {queue.length === 0 ? (
-          <div className="bg-black border-[0.5px] border-zinc-800 border-dashed rounded-2xl p-12 text-center text-zinc-600 text-xs font-medium flex flex-col items-center gap-2.5">
-            <RefreshCw className="w-5 h-5 text-zinc-700 animate-spin" style={{ animationDuration: '4s' }} />
-            <span>Kargo bo'sh. Telegramda video yuborishingiz bilan u shu yerda avtomatik paydo bo'ladi.</span>
-          </div>
-        ) : (
-          <DragDropContext onDragEnd={onDragEnd}>
-            <Droppable droppableId="premium-queue">
-              {(provided) => (
-                <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-2">
-                  {queue.map((video, index) => (
-                    <Draggable key={`v-${index}`} draggableId={`v-${index}`} index={index}>
-                      {(provided, snapshot) => (
-                        <div
-                          ref={provided.innerRef}
-                          {...provided.draggableProps}
-                          className={`flex items-center justify-between p-3.5 rounded-xl transition-all ${
-                            snapshot.isDragging 
-                              ? 'bg-zinc-900/90 border border-zinc-700/80 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] scale-[1.015] backdrop-blur-md' 
-                              : 'bg-[#09090b] border border-zinc-900/60 hover:border-zinc-800/80'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3.5 overflow-hidden">
-                            {/* Pro Grip Handle (Grip handle dots) */}
-                            <div 
-                              {...provided.dragHandleProps} 
-                              className="p-1.5 -ml-2 text-zinc-700 hover:text-zinc-400 transition-colors cursor-grab active:cursor-grabbing"
-                            >
-                              <GripVertical className="w-4 h-4 stroke-[2.5]" />
-                            </div>
-                            
-                            {/* Meta Data */}
-                            <div className="flex flex-col">
-                              <span className="text-[14px] font-bold text-zinc-200 tracking-wide font-mono">
-                                {video.mode === 'serial' ? `S${String(video.season).padStart(2, '0')}E${String(video.episode).padStart(2, '0')}` : 'FILM CLIP'}
-                              </span>
-                              <span className="text-[11px] text-zinc-500 font-medium truncate max-w-[170px] mt-0.5">{video.title}</span>
-                            </div>
-                          </div>
-                          
-                          {/* Trash Handle */}
-                          <button 
-                            onClick={() => handleDelete(index)}
-                            className="p-2.5 bg-zinc-950 hover:bg-red-950/20 text-zinc-600 hover:text-red-400 rounded-xl transition-all border border-zinc-900 hover:border-red-900/30 active:scale-90"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
-                    </Draggable>
-                  ))}
-                  {provided.placeholder}
-                </div>
-              )}
-            </Droppable>
-          </DragDropContext>
-        )}
-      </div>
-
-      {/* SECTION 5: FIXED FLOATING CONTROL HUB (Apple Solid Glass Button) */}
-      <div className="fixed bottom-0 left-0 w-full p-5 bg-gradient-to-t from-black via-black/95 to-transparent backdrop-blur-md pt-12 z-50">
-        <button 
-          onClick={handlePostToChannel}
-          className={`w-full font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest ${queue.length === 0 || posting ? 'bg-zinc-900 text-zinc-600 cursor-not-allowed border border-zinc-800/60' : 'bg-white text-black hover:bg-zinc-200 shadow-[0_0_40px_rgba(255,255,255,0.08)] active:scale-[0.98]'}`}
-          disabled={queue.length === 0 || posting}
-        >
-          <Rocket className="w-4 h-4 fill-current stroke-[2]" /> 
-          {posting ? 'Deploying Matrix...' : 'Execute Launch'}
-        </button>
-      </div>
-      
     </div>
   );
 }
