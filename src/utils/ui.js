@@ -1,10 +1,17 @@
 const { Markup } = require('telegraf');
 const { state } = require('../services/storage');
 
-const waitingFor = { type: null, menuMessageId: null, posterFileId: null };
+const waitingFor = { 
+    type: null, 
+    menuMessageId: null, 
+    poster: {
+        fileId: null,
+        name: null,
+        desc: null
+    } 
+};
 let menuDebounceTimer = null;
 
-// Premium Progress Bar Generatori
 function generateProgressBar(current, total) {
     if (total === 0) return `[░░░░░░░░░░] 0%`;
     const percent = Math.floor((current / total) * 100);
@@ -18,11 +25,9 @@ function generateCaption(index) {
     const e = String(index + 1).padStart(2, '0');
     let caption = `<b>${state.title}</b>\n<b>S${s}E${e}</b>`;
     
-    // Agar mavsumga maxsus izoh kiritilgan bo'lsa
     if (state.season_info && state.season_info.trim() !== "") {
         caption += `\n\n${state.season_info}`;
     }
-    // Agar doimiy shablon bo'lsa
     if (state.template && state.template.trim() !== "") {
         caption += `\n\n${state.template}`;
     }
@@ -36,7 +41,7 @@ const getMenuText = () => {
     if (state.template) sampleCaption += `\n\n${state.template}`;
 
     return `🎛 <b>Boshqaruv Paneli</b>\n\n` +
-           `📝 <b>Joriy shablon ko'rinishi (Preview):</b>\n` +
+           `📝 <b>Joriy shablon ko'rinishi:</b>\n` +
            `----------------------------------------\n` +
            `${sampleCaption}\n` +
            `----------------------------------------\n\n` +
