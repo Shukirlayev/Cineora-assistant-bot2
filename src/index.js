@@ -2,7 +2,7 @@ const config = require('./config');
 const { bot } = require('./core/bot');
 const { startServer } = require('./core/server');
 const { loadState } = require('./services/storage');
-const { initCommands } = require('./handlers/commands');
+const { initCommands } = require('./handlers/cmd'); // 'commands' o'rniga 'cmd'
 const { initActions } = require('./handlers/actions');
 const { initMedia } = require('./handlers/media');
 
