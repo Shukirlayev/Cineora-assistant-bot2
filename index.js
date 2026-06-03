@@ -1,36 +1,25 @@
-const { Telegraf } = require('telegraf');
-const http = require('http');
 const config = require('./src/config');
-const { loadState } = require('./src/state');
-const { registerHandlers } = require('./src/handlers');
+const { bot } = require('./src/core/bot');
+const { startServer } = require('./src/core/server');
+const { loadState } = require('./src/services/storage');
+const { initCommands } = require('./src/handlers/commands');
+const { initActions } = require('./src/handlers/actions');
+const { initMedia } = require('./src/handlers/media');
 
-const bot = new Telegraf(config.BOT_TOKEN);
+// Handler qatlamlarini botga ulash
+initCommands(bot);
+initActions(bot);
+initMedia(bot);
 
-bot.use(async (ctx, next) => {
-    if (!ctx.from || String(ctx.from.id) !== config.OWNER_ID) return;
-    try {
-        await next();
-    } catch (error) {
-        console.error("Xavfsizlik filtri xatosi:", error);
-    }
-});
-
-registerHandlers(bot);
-
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('OK');
-});
-
+// Ma'lumotlarni yuklash va tizimlarni yoqish
 loadState().then(() => {
-    server.listen(config.PORT, () => {
-        console.log(`🚀 Sog'liqni tekshirish server porti: ${config.PORT}`);
-    });
+    startServer(config.PORT);
     
-    bot.launch().catch(err => console.error("Botni yuklashda xatolik:", err));
-    console.log('🤖 Bot professional rejimda muvaffaqiyatli ishga tushdi...');
+    bot.launch().catch(err => console.error("Bot ishga tushishida xatolik:", err));
+    console.log('🤖 Bot professional enterprise karkasda muvaffaqiyatli ishga tushdi...');
 });
 
+// Kutilmagan crash xatolaridan toliq himoya
 process.on('uncaughtException', (err) => {
     console.error(`🔥 Tizimli og'ir xatolik (Bot saqlab qolindi):`, err);
 });
