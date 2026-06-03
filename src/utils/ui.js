@@ -4,8 +4,9 @@ const { state } = require('../services/storage');
 const waitingFor = { 
     type: null, 
     menuMessageId: null, 
-    promptMessageId: null, // Qadamlarni aql bilan tozalash uchun xotira
-    poster: { fileId: null, name: null, desc: null } 
+    promptMessageId: null, 
+    poster: { fileId: null, name: null, desc: null },
+    tempTemplateName: null // Yangi shablon nomini vaqtincha saqlash uchun
 };
 let menuDebounceTimer = null;
 
@@ -21,13 +22,8 @@ function generateCaption(index) {
     const s = String(state.season).padStart(2, '0');
     const e = String(index + 1).padStart(2, '0');
     let caption = `<b>${state.title}</b>\n<b>S${s}E${e}</b>`;
-    
-    if (state.season_info && state.season_info.trim() !== "") {
-        caption += `\n\n${state.season_info}`;
-    }
-    if (state.template && state.template.trim() !== "") {
-        caption += `\n\n${state.template}`;
-    }
+    if (state.season_info && state.season_info.trim() !== "") caption += `\n\n${state.season_info}`;
+    if (state.template && state.template.trim() !== "") caption += `\n\n${state.template}`;
     return caption;
 }
 
@@ -38,53 +34,51 @@ const getMenuText = () => {
     if (state.template) sampleCaption += `\n\n${state.template}`;
 
     return `🎛 <b>Boshqaruv Paneli</b>\n\n` +
-           `📝 <b>Joriy shablon ko'rinishi:</b>\n` +
+           `📝 <b>Joriy ko'rinish (Preview):</b>\n` +
            `----------------------------------------\n` +
            `${sampleCaption}\n` +
            `----------------------------------------\n\n` +
-           `📊 <b>Statistika:</b>\n` +
-           `• Mavsum: <code>${state.season}</code>\n` +
-           `• Navbatda: <code>${state.queue.length} ta</code> video`;
+           `📊 <b>Loyiha Holati:</b>\n` +
+           `• Mavsum: <code>${state.season}</code> | Navbatda: <code>${state.queue.length} ta</code> video`;
 };
 
-// 4-Taklif: Ixchamlashgan va chiroyli tugmalar qatlami
-const getMenuKeyboard = () => {
-    return Markup.inlineKeyboard([
+const getMenuKeyboard = (ctx) => {
+    // Asosiy tugmalar (Hamma adminlar uchun)
+    const buttons = [
         [Markup.button.callback('🎬 Nomi', 'action_settitle'), Markup.button.callback('📺 Fasl', 'action_setseason'), Markup.button.callback('📝 Izoh', 'action_setseasoninfo')],
-        [Markup.button.callback('🧾 Doimiy Shablon', 'action_settemplate'), Markup.button.callback('🖼 Poster', 'action_poster')],
+        [Markup.button.callback('🧾 Shablonlar', 'menu_templates'), Markup.button.callback('🖼 Poster', 'action_poster')],
         [Markup.button.callback(`📋 Navbat (${state.queue.length})`, 'action_list'), Markup.button.callback('👁 Ko\'rinish', 'action_preview'), Markup.button.callback('🗑 Tozalash', 'action_clear')],
         [Markup.button.callback('🚀 KANALGA JOYLASH', 'action_post')]
-    ]);
+    ];
+    
+    // Mastermind (Owner) uchun maxsus xavfsiz tugma qatlami
+    if (ctx.isOwner) {
+        buttons.splice(3, 0, [Markup.button.callback('⚙️ Tizim Sozlamalari', 'menu_settings')]);
+    }
+    return Markup.inlineKeyboard(buttons);
 };
 
 const sendMenu = async (ctx) => {
     waitingFor.type = null;
-    const chatId = ctx.chat.id;
-    
     if (waitingFor.menuMessageId) {
-        try { await ctx.telegram.deleteMessage(chatId, waitingFor.menuMessageId); } catch (e) {}
+        try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.menuMessageId); } catch (e) {}
     }
     if (waitingFor.promptMessageId) {
-        try { await ctx.telegram.deleteMessage(chatId, waitingFor.promptMessageId); } catch (e) {}
+        try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.promptMessageId); } catch (e) {}
         waitingFor.promptMessageId = null;
     }
-    
     try {
-        const sent = await ctx.telegram.sendMessage(chatId, getMenuText(), {
+        const sent = await ctx.telegram.sendMessage(ctx.chat.id, getMenuText(), {
             parse_mode: 'HTML',
-            ...getMenuKeyboard()
+            ...getMenuKeyboard(ctx)
         });
         waitingFor.menuMessageId = sent.message_id;
-    } catch (err) {
-        console.error("Menyu uzatishda xato:", err);
-    }
+    } catch (err) { console.error("Menyu xatosi:", err); }
 };
 
 const queueMenuRefresh = (ctx, delay = 2000) => {
     if (menuDebounceTimer) clearTimeout(menuDebounceTimer);
-    menuDebounceTimer = setTimeout(async () => {
-        await sendMenu(ctx);
-    }, delay);
+    menuDebounceTimer = setTimeout(async () => { await sendMenu(ctx); }, delay);
 };
 
 const autoWipe = (ctx, botMsgId, delay = 5000) => {
@@ -94,12 +88,5 @@ const autoWipe = (ctx, botMsgId, delay = 5000) => {
 };
 
 module.exports = {
-    waitingFor,
-    generateProgressBar,
-    generateCaption,
-    getMenuText,
-    getMenuKeyboard,
-    sendMenu,
-    queueMenuRefresh,
-    autoWipe
+    waitingFor, generateProgressBar, generateCaption, getMenuText, getMenuKeyboard, sendMenu, queueMenuRefresh, autoWipe
 };
