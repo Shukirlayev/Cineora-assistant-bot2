@@ -13,25 +13,27 @@ function initActions(bot) {
     bot.action('action_setseason', async (ctx) => {
         waitingFor.type = 'season';
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]);
-        await ctx.editMessageText(`📺 <b>Mavsum raqamini yuboring:</b>\n<i>(Masalan: 1 yoki 5)</i>`, { parse_mode: 'HTML', ...keyboard });
+        await ctx.editMessageText(`📺 <b>Mavsum raqamini yuboring:</b>`, { parse_mode: 'HTML', ...keyboard });
     });
 
     bot.action('action_setseasoninfo', async (ctx) => {
         waitingFor.type = 'season_info';
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]);
-        await ctx.editMessageText(`📝 <b>Ushbu mavsum uchun maxsus tavsifni (description) yuboring:</b>\n\n<i>Bu faqat shu mavsumga taaluqli bo'ladi va doimiy shablondan teparoqda joylashadi. Bo'sh qoldirish uchun /clear yozing.</i>`, { parse_mode: 'HTML', ...keyboard });
+        await ctx.editMessageText(`📝 <b>Mavsum uchun maxsus tavsifni yuboring:</b>\nBo'sh qoldirish uchun /clear yozing.`, { parse_mode: 'HTML', ...keyboard });
     });
 
     bot.action('action_settemplate', async (ctx) => {
         waitingFor.type = 'template';
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]);
-        await ctx.editMessageText(`🧾 <b>Doimiy shablon matnini yuboring:</b>\n<i>Bu ma'lumot (masalan, Audio, Manba) har doim eng pastda turadi. Bo'sh qoldirish uchun /clear yozing.</i>`, { parse_mode: 'HTML', ...keyboard });
+        await ctx.editMessageText(`🧾 <b>Doimiy shablon matnini yuboring:</b>\nBo'sh qoldirish uchun /clear yozing.`, { parse_mode: 'HTML', ...keyboard });
     });
 
+    // Poster bosqichining boshlanishi
     bot.action('action_poster', async (ctx) => {
         waitingFor.type = 'poster_image';
+        waitingFor.poster = { fileId: null, name: null, desc: null };
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]);
-        await ctx.editMessageText(`🖼 <b>POSTER REJIMI:</b>\n\nAvval kanalga joylanadigan <b>rasmni</b> o'zini (matnsiz) yuboring.`, { parse_mode: 'HTML', ...keyboard });
+        await ctx.editMessageText(`🖼 <b>POSTER REJIMI (1/3-qadam):</b>\n\nAvval kanalga joylanadigan <b>rasmni</b> o'zini (matnsiz) yuboring.`, { parse_mode: 'HTML', ...keyboard });
     });
 
     bot.action('action_preview', async (ctx) => {
@@ -43,33 +45,26 @@ function initActions(bot) {
 
     bot.action('action_list', async (ctx) => {
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('⬅️ Orqaga', 'action_back_to_menu')]]);
-        if (state.queue.length === 0) {
-            return ctx.editMessageText(`📋 Navbatda hech qanday video yo'q.`, keyboard);
-        }
+        if (state.queue.length === 0) return ctx.editMessageText(`📋 Navbat bo'sh.`, keyboard);
         const listText = state.queue.map((_, i) => `• E${String(i + 1).padStart(2, '0')}`).join('\n');
-        await ctx.editMessageText(`📋 <b>Navbatdagi qismlar ro'yxati:</b>\n\n${listText}`, { parse_mode: 'HTML', ...keyboard });
+        await ctx.editMessageText(`📋 <b>Navbatdagi qismlar:</b>\n\n${listText}`, { parse_mode: 'HTML', ...keyboard });
     });
 
     bot.action('action_clear', async (ctx) => {
         const keyboard = Markup.inlineKeyboard([
             [Markup.button.callback('🗑 HA, TOZALANSIN', 'confirm_clear'), Markup.button.callback('❌ BEKOR QILISH', 'action_back_to_menu')]
         ]);
-        await ctx.editMessageText(`⚠️ <b>Rostdan ham navbatdagi barcha videolarni o'chirmoqchimisiz?</b>`, { parse_mode: 'HTML', ...keyboard });
+        await ctx.editMessageText(`⚠️ <b>Rostdan ham barcha videolarni o'chirmoqchimisiz?</b>`, { parse_mode: 'HTML', ...keyboard });
     });
 
     bot.action('action_post', async (ctx) => {
-        if (state.queue.length === 0) {
-            return ctx.answerCbQuery(`❌ Navbat bo'sh! Avval video yuboring.`, { show_alert: true });
-        }
-        if (!config.TELEGRAM_CHANNEL_ID) {
-            return ctx.answerCbQuery(`❌ TELEGRAM_CHANNEL_ID sozlanmagan!`, { show_alert: true });
-        }
+        if (state.queue.length === 0) return ctx.answerCbQuery(`❌ Navbat bo'sh!`, { show_alert: true });
+        if (!config.TELEGRAM_CHANNEL_ID) return ctx.answerCbQuery(`❌ KANAL ID topilmadi!`, { show_alert: true });
 
         const keyboard = Markup.inlineKeyboard([
             [Markup.button.callback('🚀 ZUDLIK BILAN JOYLASH', 'confirm_post')],
             [Markup.button.callback('❌ BEKOR QILISH', 'action_back_to_menu')]
         ]);
-
         await ctx.editMessageText(`🚀 <b>Kanalga jami ${state.queue.length} ta video joylanadi. Tasdiqlaysizmi?</b>`, { parse_mode: 'HTML', ...keyboard });
     });
 
@@ -86,7 +81,7 @@ function initActions(bot) {
             state.queue = [];
             await saveState();
             const info = await ctx.replyWithHTML(`🗑 Navbat muvaffaqiyatli tozalandi.`);
-            autoWipe(ctx, info.message_id);
+            autoWipe(ctx, info.message_id, 5000);
             await sendMenu(ctx);
         } catch (e) { console.error(e); }
     });
@@ -109,15 +104,13 @@ function initActions(bot) {
                                          `${generateProgressBar(successCount, state.queue.length)}\n` +
                                          `✅ <b>${successCount} / ${state.queue.length}</b> ta qism joylandi.`;
 
-                    // Xabar aynan bir xil bo'lsa Telegram xato bermasligi uchun tekshiramiz
                     if (progressText !== lastProgressText) {
                         await ctx.editMessageText(progressText, { parse_mode: 'HTML' }).catch(e => {});
                         lastProgressText = progressText;
                     }
-
                 } catch (error) {
-                    const errNotif = await ctx.reply(`❌ Xatolik yuz berdi (Qism E${String(i + 1).padStart(2, '0')}): ${error.message}`);
-                    autoWipe(ctx, errNotif.message_id, null, 15000);
+                    const errNotif = await ctx.reply(`❌ Xatolik (E${String(i + 1).padStart(2, '0')}): ${error.message}`);
+                    autoWipe(ctx, errNotif.message_id, 15000);
                     break; 
                 }
             }
