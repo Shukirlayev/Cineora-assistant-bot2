@@ -30,7 +30,6 @@ const getMenuKeyboard = () => {
     ]);
 };
 
-// Eski menyuni o'chirib, har doim eng pastda toza yangi menyu ochish
 const sendMenu = async (ctx) => {
     waitingFor.type = null;
     const chatId = ctx.chat.id;
@@ -52,7 +51,6 @@ const sendMenu = async (ctx) => {
     }
 };
 
-// Guruhli oqim kelganda Telegram rate-limit bermasligi uchun aqlli Debounce boshqaruvi
 const queueMenuRefresh = (ctx, delay = 2000) => {
     if (menuDebounceTimer) clearTimeout(menuDebounceTimer);
     menuDebounceTimer = setTimeout(async () => {
@@ -60,13 +58,10 @@ const queueMenuRefresh = (ctx, delay = 2000) => {
     }, delay);
 };
 
-// Ekranni toza saqlash uchun bot va foydalanuvchi xabarlarini 5 soniyada yo'qotish
-const autoWipe = (ctx, botMsgId, userMsgId = null, delay = 5000) => {
+// Faqat bot yuborgan vaqtinchalik xabarni o'chirish (Foydalanuvchi xabari saqlanadi)
+const autoWipe = (ctx, botMsgId, delay = 5000) => {
     setTimeout(async () => {
         try { await ctx.telegram.deleteMessage(ctx.chat.id, botMsgId); } catch (e) {}
-        if (userMsgId) {
-            try { await ctx.telegram.deleteMessage(ctx.chat.id, userMsgId); } catch (e) {}
-        }
     }, delay);
 };
 
@@ -85,17 +80,17 @@ const handleInputPrompt = async (ctx, promptText) => {
 
 const handleSetTitle = async (ctx) => {
     waitingFor.type = 'title';
-    await handleInputPrompt(ctx, '🎬 <b>Kino yoki Serial nomini yuboring:</b>\n<i>(Masalan: Dark yoki Breaking Bad)</i>');
+    await handleInputPrompt(ctx, `🎬 <b>Kino yoki Serial nomini yuboring:</b>\n<i>(Masalan: Dark yoki Breaking Bad)</i>`);
 };
 
 const handleSetSeason = async (ctx) => {
     waitingFor.type = 'season';
-    await handleInputPrompt(ctx, '📺 <b>Mavsum raqamini yuboring:</b>\n<i>(Masalan: 1 yoki 5)</i>');
+    await handleInputPrompt(ctx, `📺 <b>Mavsum raqamini yuboring:</b>\n<i>(Masalan: 1 yoki 5)</i>`);
 };
 
 const handleSetTemplate = async (ctx) => {
     waitingFor.type = 'template';
-    await handleInputPrompt(ctx, '🧾 <b>Video ostiga tushadigan doimiy shablon matnini yuboring:</b>\n<i>(Masalan:</i>\n<code>Video: 1080p | Blu-Ray\nAudio: Uzb, Eng\n@CineoraUz</code><i>)</i>');
+    await handleInputPrompt(ctx, `🧾 <b>Video ostiga tushadigan doimiy shablon matnini yuboring:</b>\n<i>(Masalan:</i>\n<code>Video: 1080p | Blu-Ray\nAudio: Uzb, Eng\n@CineoraUz</code><i>)</i>`);
 };
 
 const handlePreview = async (ctx) => {
@@ -111,7 +106,7 @@ const handleList = async (ctx) => {
     if (ctx.callbackQuery) {
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('⬅️ Orqaga', 'action_back_to_menu')]]);
         if (state.queue.length === 0) {
-            return ctx.editMessageText('📋 Navbatda hech qanday video yo\'q.', keyboard);
+            return ctx.editMessageText(`📋 Navbatda hech qanday video yo'q.`, keyboard);
         }
         const listText = state.queue.map((_, i) => `• E${String(i + 1).padStart(2, '0')}`).join('\n');
         await ctx.editMessageText(`📋 <b>Navbatdagi qismlar ro'yxati:</b>\n\n${listText}`, { parse_mode: 'HTML', ...keyboard });
@@ -123,17 +118,17 @@ const handleClear = async (ctx) => {
         const keyboard = Markup.inlineKeyboard([
             [Markup.button.callback('🗑 HA, TOZALANSIN', 'confirm_clear'), Markup.button.callback('❌ BEKOR QILISH', 'action_back_to_menu')]
         ]);
-        await ctx.editMessageText('⚠️ <b>Rostdan ham navbatdagi barcha videolarni o\'chirmoqchimisiz?</b>', { parse_mode: 'HTML', ...keyboard });
+        await ctx.editMessageText(`⚠️ <b>Rostdan ham navbatdagi barcha videolarni o'chirmoqchimisiz?</b>`, { parse_mode: 'HTML', ...keyboard });
     }
 };
 
 const handlePost = async (ctx) => {
     if (ctx.callbackQuery) {
         if (state.queue.length === 0) {
-            return ctx.answerCbQuery('❌ Navbat bo\'sh! Avval video yuboring.', { show_alert: true });
+            return ctx.answerCbQuery(`❌ Navbat bo'sh! Avval video yuboring.`, { show_alert: true });
         }
         if (!config.TELEGRAM_CHANNEL_ID) {
-            return ctx.answerCbQuery('❌ TELEGRAM_CHANNEL_ID sozlanmagan!', { show_alert: true });
+            return ctx.answerCbQuery(`❌ TELEGRAM_CHANNEL_ID sozlanmagan!`, { show_alert: true });
         }
 
         const firstPreview = generateCaption(0);
@@ -192,7 +187,7 @@ const registerHandlers = (bot) => {
         try {
             state.queue = [];
             await saveState();
-            const info = await ctx.replyWithHTML('🗑 Navbat muvaffaqiyatli tozalandi.');
+            const info = await ctx.replyWithHTML(`🗑 Navbat muvaffaqiyatli tozalandi.`);
             autoWipe(ctx, info.message_id);
             await sendMenu(ctx);
         } catch (e) { console.error(e); }
@@ -212,7 +207,7 @@ const registerHandlers = (bot) => {
                     successCount++;
                 } catch (error) {
                     const errNotif = await ctx.reply(`❌ Xatolik yuz berdi (Qism index ${i}): ${error.message}`);
-                    autoWipe(ctx, errNotif.message_id, null, 15000);
+                    autoWipe(ctx, errNotif.message_id, 15000);
                     break; 
                 }
             }
@@ -241,8 +236,8 @@ const registerHandlers = (bot) => {
             const eStr = String(state.queue.length).padStart(2, '0');
             
             const sentNotif = await ctx.replyWithHTML(`✅ Video qo'shildi: <b>S${sStr}E${eStr}</b>`);
-            // Video xabari va bot bildirishnomasini 5 soniyada butunlay o'chiramiz
-            autoWipe(ctx, sentNotif.message_id, ctx.message.message_id, 5000);
+            // Faqat bot bildirishnomasini o'chiramiz, video chatda qoladi
+            autoWipe(ctx, sentNotif.message_id, 5000);
             
             queueMenuRefresh(ctx, 2000);
         } catch (e) { console.error(e); }
@@ -251,32 +246,31 @@ const registerHandlers = (bot) => {
     bot.on('text', async (ctx, next) => {
         try {
             if (!waitingFor.type) {
-                const warn = await ctx.replyWithHTML('⚠️ <b>Xatolik:</b> Matn kiritish rejimi faol emas! Nomi yoki Shablonni o\'zgartirish uchun avval quyidagi menyudan kerakli tugmani bosing.');
-                autoWipe(ctx, warn.message_id, ctx.message.message_id, 6000);
+                const warn = await ctx.replyWithHTML(`⚠️ <b>Xatolik:</b> Matn kiritish rejimi faol emas! Nomi yoki Shablonni o'zgartirish uchun avval quyidagi menyudan kerakli tugmani bosing.`);
+                autoWipe(ctx, warn.message_id, 6000);
                 await sendMenu(ctx);
                 return;
             }
             const text = ctx.message.text;
-            const userMsgId = ctx.message.message_id;
 
             if (waitingFor.type === 'title') {
                 state.title = text;
                 const info = await ctx.replyWithHTML(`✅ Kino/Serial nomi yangilandi: <b>${state.title}</b>`);
-                autoWipe(ctx, info.message_id, userMsgId, 5000);
+                autoWipe(ctx, info.message_id, 5000);
             } else if (waitingFor.type === 'season') {
                 const parsed = parseInt(text, 10);
                 if (isNaN(parsed)) {
-                    const err = await ctx.reply('❌ Noto\'g\'ri raqam. Mavsum raqamini qayta yuboring:');
-                    autoWipe(ctx, err.message_id, userMsgId, 5000);
+                    const err = await ctx.reply(`❌ Noto'g'ri raqam. Mavsum raqamini qayta yuboring:`);
+                    autoWipe(ctx, err.message_id, 5000);
                     return;
                 }
                 state.season = parsed;
                 const info = await ctx.replyWithHTML(`✅ Mavsum raqami yangilandi: <b>${state.season}</b>`);
-                autoWipe(ctx, info.message_id, userMsgId, 5000);
+                autoWipe(ctx, info.message_id, 5000);
             } else if (waitingFor.type === 'template') {
                 state.template = text;
                 const info = await ctx.replyWithHTML(`✅ Doimiy shablon matni muvaffaqiyatli saqlandi.`);
-                autoWipe(ctx, info.message_id, userMsgId, 5000);
+                autoWipe(ctx, info.message_id, 5000);
             }
 
             await saveState();
