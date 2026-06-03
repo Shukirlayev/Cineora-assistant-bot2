@@ -128,7 +128,6 @@ function initActions(bot) {
         await ctx.editMessageText(`🖼 <b>POSTER (1/3):</b>\nAvval <b>rasmni</b> o'zini yuboring.`, { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]) });
     });
 
-    // POSTER JOYLASHNI JONLI TASDIQLASH (3-muammo yechimi)
     bot.action('confirm_poster_send', async (ctx) => {
         const userId = String(ctx.from.id);
         const session = getSession(userId);
@@ -204,6 +203,7 @@ function initActions(bot) {
         await sendMenu(ctx);
     });
 
+    // 🚀 O'TA TEZKOR YUKLASH VA AQLLI KUTISH (SMART RETRY) TIZIMI
     bot.action('confirm_post', async (ctx) => {
         try {
             const userId = String(ctx.from.id);
@@ -213,24 +213,45 @@ function initActions(bot) {
             await ctx.editMessageText(`⏳ <b>Kanalga yuklanmoqda... Kuting!</b>\n${generateProgressBar(0, totalVideos)}`, { parse_mode: 'HTML' });
             let successCount = 0;
             let lastText = '';
+            let hasFatalError = false;
 
             for (let i = 0; i < totalVideos; i++) {
-                try {
-                    await ctx.telegram.sendVideo(config.TELEGRAM_CHANNEL_ID, ws.queue[i].fileId, { caption: generateCaption(ws.queue[i]), parse_mode: 'HTML' });
-                    successCount++;
-                    const pText = `🚀 <b>Yuklanmoqda... (Oyna yopilmasin)</b>\n\n${generateProgressBar(successCount, totalVideos)}\n✅ <b>${successCount} / ${totalVideos}</b>`;
-                    if (pText !== lastText) { await ctx.editMessageText(pText, { parse_mode: 'HTML' }).catch(e=>{}); lastText = pText; }
-                    
-                    if (i < totalVideos - 1) {
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                        if (successCount % 10 === 0) await new Promise(resolve => setTimeout(resolve, 5000));
+                let isUploaded = false;
+                
+                // Video muvaffaqiyatli yuklanmaguncha yoki jiddiy xato chiqmaguncha harakat qiladi
+                while (!isUploaded) {
+                    try {
+                        await ctx.telegram.sendVideo(config.TELEGRAM_CHANNEL_ID, ws.queue[i].fileId, { caption: generateCaption(ws.queue[i]), parse_mode: 'HTML' });
+                        successCount++;
+                        isUploaded = true;
+                        
+                        const pText = `🚀 <b>Yuklanmoqda... (Oyna yopilmasin)</b>\n\n${generateProgressBar(successCount, totalVideos)}\n✅ <b>${successCount} / ${totalVideos}</b>`;
+                        if (pText !== lastText) { await ctx.editMessageText(pText, { parse_mode: 'HTML' }).catch(e=>{}); lastText = pText; }
+                        
+                    } catch (error) {
+                        // 429 xatosi - Telegram "Too Many Requests" rate limiti
+                        if (error.code === 429) {
+                            // Telegram qancha kutish kerakligini aytadi. Agar aytmasa zaxira sifatida 30s kutamiz
+                            const retryAfter = error.response?.parameters?.retry_after || 30; 
+                            
+                            const waitText = `⏳ <b>Telegram Cheklovi!</b>\nTelegram qisqa tanaffus so'radi. Bot <b>${retryAfter} soniya</b> kutmoqda (avtomat davom etadi)...\n\n${generateProgressBar(successCount, totalVideos)}\n✅ <b>${successCount} / ${totalVideos}</b>`;
+                            if (waitText !== lastText) { await ctx.editMessageText(waitText, { parse_mode: 'HTML' }).catch(e=>{}); lastText = waitText; }
+                            
+                            // Aytilgan vaqtdan 1 soniya ko'proq kutib qayta urinamiz
+                            await new Promise(resolve => setTimeout(resolve, (retryAfter + 1) * 1000)); 
+                        } else {
+                            // Agar umuman boshqa xato bo'lsa (masalan fayl o'chib ketgan bo'lsa), jarayonni to'xtatadi
+                            autoWipe(ctx, (await ctx.reply(`❌ Xato (Video ${i + 1}): ${error.message}`)).message_id, 15000);
+                            hasFatalError = true;
+                            break; 
+                        }
                     }
-                } catch (error) {
-                    autoWipe(ctx, (await ctx.reply(`❌ Xato (Video ${i + 1}): ${error.message}`)).message_id, 15000);
-                    break; 
                 }
+                
+                if (hasFatalError) break;
             }
 
+            // Yuklash tugagach (to'liq yoki qisman) statistika va bazani saqlash
             if (successCount > 0) {
                 state.stats.total_posts += 1;
                 state.stats.total_videos += successCount;
@@ -249,7 +270,7 @@ function initActions(bot) {
                 await saveState();
             }
 
-            const msg = successCount === totalVideos ? `✅ Boooom! Barcha ${successCount} ta qism joylandi.` : `⚠️ Qisman to'xtadi. ${successCount} ta joylandi.`;
+            const msg = successCount === totalVideos ? `✅ Boooom! Barcha ${successCount} ta qism muvaffaqiyatli joylandi.` : `⚠️ Qisman to'xtadi. ${successCount} ta joylandi. Qolganlari navbatda qoldi.`;
             autoWipe(ctx, (await ctx.replyWithHTML(msg)).message_id, 15000);
             await sendMenu(ctx);
         } catch (e) { console.error(e); }
