@@ -3,10 +3,10 @@ const path = require('path');
 
 const DATA_FILE = path.join(__dirname, '../../data.json');
 
-// Ob'ekt manzili buzilmasligi uchun qulflangan yagona oqim
 const state = {
     title: "Untitled",
     season: 1,
+    season_info: "", // Yangi: Faslga xos alohida matn
     template: "",
     queue: []
 };
@@ -18,6 +18,7 @@ async function loadState() {
         
         state.title = parsed.title || "Untitled";
         state.season = parsed.season || 1;
+        state.season_info = parsed.season_info || "";
         state.template = parsed.template || "";
         state.queue = Array.isArray(parsed.queue) ? parsed.queue : [];
     } catch (error) {
