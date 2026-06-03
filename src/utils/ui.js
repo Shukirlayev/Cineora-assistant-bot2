@@ -1,14 +1,18 @@
 const { Markup } = require('telegraf');
-const { state } = require('../services/storage');
+const { state, getWorkspace } = require('../services/storage');
 
-const waitingFor = { 
-    type: null, 
-    menuMessageId: null, 
-    promptMessageId: null, 
-    poster: { fileId: null, name: null, desc: null },
-    tempTemplateName: null // Yangi shablon nomini vaqtincha saqlash uchun
-};
-let menuDebounceTimer = null;
+// Yangi: Har bir adminning vaqtinchalik xotirasi (UI Sessions)
+const sessions = {};
+
+function getSession(userId) {
+    if (!sessions[userId]) {
+        sessions[userId] = {
+            waitingFor: { type: null, menuMessageId: null, promptMessageId: null, poster: { fileId: null, name: null, desc: null }, tempTemplateName: null },
+            menuDebounceTimer: null
+        };
+    }
+    return sessions[userId];
+}
 
 function generateProgressBar(current, total) {
     if (total === 0) return `[░░░░░░░░░░] 0%`;
@@ -18,40 +22,43 @@ function generateProgressBar(current, total) {
     return `[${bar}] ${percent}%`;
 }
 
-function generateCaption(index) {
-    const s = String(state.season).padStart(2, '0');
+function generateCaption(userId, index) {
+    const ws = getWorkspace(userId);
+    const s = String(ws.season).padStart(2, '0');
     const e = String(index + 1).padStart(2, '0');
-    let caption = `<b>${state.title}</b>\n<b>S${s}E${e}</b>`;
-    if (state.season_info && state.season_info.trim() !== "") caption += `\n\n${state.season_info}`;
-    if (state.template && state.template.trim() !== "") caption += `\n\n${state.template}`;
+    let caption = `<b>${ws.title}</b>\n<b>S${s}E${e}</b>`;
+    if (ws.season_info && ws.season_info.trim() !== "") caption += `\n\n${ws.season_info}`;
+    if (ws.template && ws.template.trim() !== "") caption += `\n\n${ws.template}`;
     return caption;
 }
 
-const getMenuText = () => {
-    const s = String(state.season).padStart(2, '0');
-    let sampleCaption = `<b>${state.title}</b>\n<b>S${s}E01</b>`;
-    if (state.season_info) sampleCaption += `\n\n${state.season_info}`;
-    if (state.template) sampleCaption += `\n\n${state.template}`;
+const getMenuText = (userId) => {
+    const ws = getWorkspace(userId);
+    const s = String(ws.season).padStart(2, '0');
+    let sampleCaption = `<b>${ws.title}</b>\n<b>S${s}E01</b>`;
+    if (ws.season_info) sampleCaption += `\n\n${ws.season_info}`;
+    if (ws.template) sampleCaption += `\n\n${ws.template}`;
 
-    return `🎛 <b>Boshqaruv Paneli</b>\n\n` +
+    return `🎛 <b>Boshqaruv Paneli (Shaxsiy Ish Stoli)</b>\n\n` +
            `📝 <b>Joriy ko'rinish (Preview):</b>\n` +
            `----------------------------------------\n` +
            `${sampleCaption}\n` +
            `----------------------------------------\n\n` +
            `📊 <b>Loyiha Holati:</b>\n` +
-           `• Mavsum: <code>${state.season}</code> | Navbatda: <code>${state.queue.length} ta</code> video`;
+           `• Mavsum: <code>${ws.season}</code> | Navbatda: <code>${ws.queue.length} ta</code> video`;
 };
 
 const getMenuKeyboard = (ctx) => {
-    // Asosiy tugmalar (Hamma adminlar uchun)
+    const userId = String(ctx.from.id);
+    const ws = getWorkspace(userId);
+    
     const buttons = [
         [Markup.button.callback('🎬 Nomi', 'action_settitle'), Markup.button.callback('📺 Fasl', 'action_setseason'), Markup.button.callback('📝 Izoh', 'action_setseasoninfo')],
         [Markup.button.callback('🧾 Shablonlar', 'menu_templates'), Markup.button.callback('🖼 Poster', 'action_poster')],
-        [Markup.button.callback(`📋 Navbat (${state.queue.length})`, 'action_list'), Markup.button.callback('👁 Ko\'rinish', 'action_preview'), Markup.button.callback('🗑 Tozalash', 'action_clear')],
+        [Markup.button.callback(`📋 Navbat (${ws.queue.length})`, 'action_list'), Markup.button.callback('👁 Ko\'rinish', 'action_preview'), Markup.button.callback('🗑 Tozalash', 'action_clear')],
         [Markup.button.callback('🚀 KANALGA JOYLASH', 'action_post')]
     ];
     
-    // Mastermind (Owner) uchun maxsus xavfsiz tugma qatlami
     if (ctx.isOwner) {
         buttons.splice(3, 0, [Markup.button.callback('⚙️ Tizim Sozlamalari', 'menu_settings')]);
     }
@@ -59,26 +66,34 @@ const getMenuKeyboard = (ctx) => {
 };
 
 const sendMenu = async (ctx) => {
-    waitingFor.type = null;
-    if (waitingFor.menuMessageId) {
-        try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.menuMessageId); } catch (e) {}
+    const userId = String(ctx.from.id);
+    const session = getSession(userId);
+    const chatId = ctx.chat.id;
+    
+    session.waitingFor.type = null;
+    
+    if (session.waitingFor.menuMessageId) {
+        try { await ctx.telegram.deleteMessage(chatId, session.waitingFor.menuMessageId); } catch (e) {}
     }
-    if (waitingFor.promptMessageId) {
-        try { await ctx.telegram.deleteMessage(ctx.chat.id, waitingFor.promptMessageId); } catch (e) {}
-        waitingFor.promptMessageId = null;
+    if (session.waitingFor.promptMessageId) {
+        try { await ctx.telegram.deleteMessage(chatId, session.waitingFor.promptMessageId); } catch (e) {}
+        session.waitingFor.promptMessageId = null;
     }
+    
     try {
-        const sent = await ctx.telegram.sendMessage(ctx.chat.id, getMenuText(), {
+        const sent = await ctx.telegram.sendMessage(chatId, getMenuText(userId), {
             parse_mode: 'HTML',
             ...getMenuKeyboard(ctx)
         });
-        waitingFor.menuMessageId = sent.message_id;
+        session.waitingFor.menuMessageId = sent.message_id;
     } catch (err) { console.error("Menyu xatosi:", err); }
 };
 
 const queueMenuRefresh = (ctx, delay = 2000) => {
-    if (menuDebounceTimer) clearTimeout(menuDebounceTimer);
-    menuDebounceTimer = setTimeout(async () => { await sendMenu(ctx); }, delay);
+    const userId = String(ctx.from.id);
+    const session = getSession(userId);
+    if (session.menuDebounceTimer) clearTimeout(session.menuDebounceTimer);
+    session.menuDebounceTimer = setTimeout(async () => { await sendMenu(ctx); }, delay);
 };
 
 const autoWipe = (ctx, botMsgId, delay = 5000) => {
@@ -88,5 +103,5 @@ const autoWipe = (ctx, botMsgId, delay = 5000) => {
 };
 
 module.exports = {
-    waitingFor, generateProgressBar, generateCaption, getMenuText, getMenuKeyboard, sendMenu, queueMenuRefresh, autoWipe
+    getSession, generateProgressBar, generateCaption, getMenuText, getMenuKeyboard, sendMenu, queueMenuRefresh, autoWipe
 };
