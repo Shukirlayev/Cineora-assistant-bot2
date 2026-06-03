@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 // REACT SAYTNI OCHIB BERISH (Kelajakda React build fayllari public papkasiga tushadi)
-app.use(express.static(path.join(__dirname, '../../public')));
+app.use(express.static(path.join(__dirname, '../../dist')));
 
 // 1️⃣ API: React saytiga Navbat va Statistikani beruvchi yo'lak
 app.get('/api/workspace/:userId', (req, res) => {
