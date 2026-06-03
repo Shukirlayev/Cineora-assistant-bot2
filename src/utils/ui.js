@@ -6,7 +6,7 @@ const sessions = {};
 function getSession(userId) {
     if (!sessions[userId]) {
         sessions[userId] = {
-            waitingFor: { type: null, menuMessageId: null, promptMessageId: null, poster: { fileId: null, name: null, desc: null }, tempTemplateName: null },
+            waitingFor: { type: null, menuMessageId: null, promptMessageId: null, poster: { fileId: null, name: null, desc: null, finalCaption: null }, tempTemplateName: null },
             menuDebounceTimer: null
         };
     }
@@ -49,7 +49,6 @@ const getMenuText = (userId) => {
 const getMenuKeyboard = (ctx) => {
     const ws = getWorkspace(String(ctx.from.id));
     
-    // YUPQA VA MUKAMMAL MENYU
     const buttons = [
         [Markup.button.callback('⚙️ Loyiha Parametrlari', 'menu_project_settings')],
         [Markup.button.callback('🖼 Poster', 'action_poster'), Markup.button.callback('👁 Ko\'rinish', 'action_preview')],
@@ -81,7 +80,7 @@ const sendMenu = async (ctx) => {
     try {
         const sent = await ctx.telegram.sendMessage(chatId, getMenuText(userId), { parse_mode: 'HTML', ...getMenuKeyboard(ctx) });
         session.waitingFor.menuMessageId = sent.message_id;
-    } catch (err) { console.error("Menyu xatosi:", err); }
+    } catch (err) { console.error('Menyu xatosi:', err); }
 };
 
 const queueMenuRefresh = (ctx, delay = 2000) => {
