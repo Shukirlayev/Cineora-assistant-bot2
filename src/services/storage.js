@@ -4,15 +4,25 @@ const config = require('../config');
 let collection = null;
 
 const state = {
-    title: "Untitled",
-    season: 1,
-    season_info: "",
-    template: "", // Joriy faol shablon
-    queue: [],
-    saved_templates: [], // { name: "Kino", text: "..." }
-    admins: [], // Yordamchilarning ID raqamlari
-    stats: { total_posts: 0, total_videos: 0 } // Avtomat statistika
+    workspaces: {}, // Yangi: Har bir foydalanuvchining alohida ish stoli
+    saved_templates: [],
+    admins: [],
+    stats: { total_posts: 0, total_videos: 0 }
 };
+
+// Yangi funksiya: Adminning shaxsiy ish stolini olib beradi
+function getWorkspace(userId) {
+    if (!state.workspaces[userId]) {
+        state.workspaces[userId] = {
+            title: "Untitled",
+            season: 1,
+            season_info: "",
+            template: "",
+            queue: []
+        };
+    }
+    return state.workspaces[userId];
+}
 
 async function loadState() {
     try {
@@ -23,15 +33,14 @@ async function loadState() {
         
         const data = await collection.findOne({ _id: "main_state" });
         if (data) {
-            Object.assign(state, data);
-            state.queue = Array.isArray(data.queue) ? data.queue : [];
+            state.workspaces = data.workspaces || {};
             state.saved_templates = Array.isArray(data.saved_templates) ? data.saved_templates : [];
             state.admins = Array.isArray(data.admins) ? data.admins : [];
             state.stats = data.stats || { total_posts: 0, total_videos: 0 };
         } else {
             await saveState();
         }
-    } catch (error) { console.error("❌ MongoDB ulanish xatosi:", error); }
+    } catch (error) { console.error("❌ MongoDB xatosi:", error); }
 }
 
 async function saveState() {
@@ -41,4 +50,4 @@ async function saveState() {
     } catch (error) { console.error("🔄 MongoDB yozish xatosi:", error); }
 }
 
-module.exports = { state, loadState, saveState };
+module.exports = { state, getWorkspace, loadState, saveState };
