@@ -4,11 +4,8 @@ const { state } = require('../services/storage');
 const waitingFor = { 
     type: null, 
     menuMessageId: null, 
-    poster: {
-        fileId: null,
-        name: null,
-        desc: null
-    } 
+    promptMessageId: null, // Qadamlarni aql bilan tozalash uchun xotira
+    poster: { fileId: null, name: null, desc: null } 
 };
 let menuDebounceTimer = null;
 
@@ -46,17 +43,17 @@ const getMenuText = () => {
            `${sampleCaption}\n` +
            `----------------------------------------\n\n` +
            `📊 <b>Statistika:</b>\n` +
-           `• Mavsum raqami: <code>${state.season}</code>\n` +
-           `• Navbatdagi videolar: <code>${state.queue.length} ta</code>`;
+           `• Mavsum: <code>${state.season}</code>\n` +
+           `• Navbatda: <code>${state.queue.length} ta</code> video`;
 };
 
+// 4-Taklif: Ixchamlashgan va chiroyli tugmalar qatlami
 const getMenuKeyboard = () => {
     return Markup.inlineKeyboard([
-        [Markup.button.callback('🎬 Nomi', 'action_settitle'), Markup.button.callback('📺 Mavsum', 'action_setseason')],
-        [Markup.button.callback('📝 Mavsum Izohi', 'action_setseasoninfo'), Markup.button.callback('🧾 Doimiy Shablon', 'action_settemplate')],
-        [Markup.button.callback('📋 Navbat', 'action_list'), Markup.button.callback('👁 Ko\'rinish', 'action_preview')],
-        [Markup.button.callback('🗑 Tozalash', 'action_clear'), Markup.button.callback('🖼 Poster Joylash', 'action_poster')],
-        [Markup.button.callback('🚀 Kanalga Joylash', 'action_post')]
+        [Markup.button.callback('🎬 Nomi', 'action_settitle'), Markup.button.callback('📺 Fasl', 'action_setseason'), Markup.button.callback('📝 Izoh', 'action_setseasoninfo')],
+        [Markup.button.callback('🧾 Doimiy Shablon', 'action_settemplate'), Markup.button.callback('🖼 Poster', 'action_poster')],
+        [Markup.button.callback(`📋 Navbat (${state.queue.length})`, 'action_list'), Markup.button.callback('👁 Ko\'rinish', 'action_preview'), Markup.button.callback('🗑 Tozalash', 'action_clear')],
+        [Markup.button.callback('🚀 KANALGA JOYLASH', 'action_post')]
     ]);
 };
 
@@ -66,6 +63,10 @@ const sendMenu = async (ctx) => {
     
     if (waitingFor.menuMessageId) {
         try { await ctx.telegram.deleteMessage(chatId, waitingFor.menuMessageId); } catch (e) {}
+    }
+    if (waitingFor.promptMessageId) {
+        try { await ctx.telegram.deleteMessage(chatId, waitingFor.promptMessageId); } catch (e) {}
+        waitingFor.promptMessageId = null;
     }
     
     try {
