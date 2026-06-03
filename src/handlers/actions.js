@@ -4,7 +4,6 @@ const config = require('../config');
 const { getSession, generateProgressBar, generateCaption, getMenuText, getMenuKeyboard, sendMenu, autoWipe } = require('../utils/ui');
 
 function initActions(bot) {
-    // --- 1. YANGI LOYIHA PARAMETRLARI (SUB-MENU) ---
     bot.action('menu_project_settings', async (ctx) => {
         const ws = getWorkspace(String(ctx.from.id));
         const modeText = ws.mode === 'serial' ? '🔀 Rejim: Serial' : '🔀 Rejim: Kino';
@@ -31,14 +30,12 @@ function initActions(bot) {
         await ctx.editMessageText(`📝 <b>Fasl/Kino izohini yuboring:</b>\nBo'sh qoldirish uchun /clear`, { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]) });
     });
 
-    // 2-MUAMMO YECHIMI: Rejimni vizual tasdiqlash bilan o'zgartirish
     bot.action('action_switch_mode', async (ctx) => {
         const ws = getWorkspace(String(ctx.from.id));
         ws.mode = ws.mode === 'serial' ? 'movie' : 'serial';
         await saveState();
         await ctx.answerCbQuery(`Rejim o'zgardi: ${ws.mode.toUpperCase()}`, { show_alert: false });
         
-        // Sub-menuni darhol qayta chizamiz
         const modeText = ws.mode === 'serial' ? '🔀 Rejim: Serial' : '🔀 Rejim: Kino';
         const text = `⚙️ <b>Loyiha Parametrlari</b>\n\nJoriy holat: <b>${ws.mode.toUpperCase()}</b>`;
         const buttons = [
@@ -50,10 +47,9 @@ function initActions(bot) {
         await ctx.editMessageText(text, { parse_mode: 'HTML', ...Markup.inlineKeyboard(buttons) });
     });
 
-    // 3-MUAMMO YECHIMI: Mavsumni yopishda tasdiq so'rash
     bot.action('action_end_season', async (ctx) => {
         const ws = getWorkspace(String(ctx.from.id));
-        if (ws.mode !== 'serial') return ctx.answerCbQuery("Bu tugma faqat Serial rejimida ishlaydi!", { show_alert: true });
+        if (ws.mode !== 'serial') return ctx.answerCbQuery('Bu tugma faqat Serial rejimida ishlaydi!', { show_alert: true });
         
         const text = `⚠️ <b>S${String(ws.season).padStart(2, '0')} ni yopamizmi?</b>\n\nBu barcha taxlangan qismlarni tasdiqlab, navbatdagi S${String(ws.season + 1).padStart(2, '0')} ga o'tishga tayyorlaydi.`;
         const buttons = [[Markup.button.callback('🏁 HA, YOPISH', 'confirm_end_season'), Markup.button.callback('❌ BEKOR QILISH', 'action_back_to_menu')]];
@@ -68,7 +64,6 @@ function initActions(bot) {
         await sendMenu(ctx);
     });
 
-    // --- SHABLONLAR ---
     bot.action('menu_templates', async (ctx) => {
         const ws = getWorkspace(String(ctx.from.id));
         let text = `🧾 <b>Shablonlar Menejeri</b>\n\nFaol shablon:\n<code>${ws.template || "Yo'q"}</code>\n\nTanlang:`;
@@ -93,11 +88,10 @@ function initActions(bot) {
         state.saved_templates.splice(parseInt(ctx.match[1]), 1); await saveState(); await sendMenu(ctx);
     });
 
-    // --- 5-MUAMMO YECHIMI: HAQIQIY DETALLI STATISTIKA VA AUDIT LOG ---
     bot.action('menu_settings', async (ctx) => {
         if (!ctx.isOwner) return ctx.answerCbQuery("🚫 Ruxsat yo'q!", { show_alert: true });
         
-        let histText = "<i>Hali hech qanday loyiha joylanmagan.</i>";
+        let histText = '<i>Hali hech qanday loyiha joylanmagan.</i>';
         if (state.stats.history && state.stats.history.length > 0) {
             histText = state.stats.history.slice(0, 5).map(h => 
                 `▪️ <b>${h.title}</b> (${h.type === 'poster' ? 'Poster' : (h.type === 'serial' ? `S${h.season} | ${h.episodes} qism` : `Kino | ${h.episodes} ta video`)})\n` +
@@ -127,12 +121,51 @@ function initActions(bot) {
         await ctx.editMessageText(`🗑 <b>Adminni o'chirish:</b>\nJoriy adminlar:\n• ${state.admins.join('\n• ') || "Yo'q"}\n\nID ni yuboring.`, { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'menu_settings')]]) });
     });
 
-    // --- NAVBAT VA POST ---
     bot.action('action_poster', async (ctx) => {
         const session = getSession(String(ctx.from.id));
         session.waitingFor.type = 'poster_image';
-        session.waitingFor.poster = { fileId: null, name: null, desc: null };
+        session.waitingFor.poster = { fileId: null, name: null, desc: null, finalCaption: null };
         await ctx.editMessageText(`🖼 <b>POSTER (1/3):</b>\nAvval <b>rasmni</b> o'zini yuboring.`, { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'action_cancel_input')]]) });
+    });
+
+    // POSTER JOYLASHNI JONLI TASDIQLASH (3-muammo yechimi)
+    bot.action('confirm_poster_send', async (ctx) => {
+        const userId = String(ctx.from.id);
+        const session = getSession(userId);
+        
+        if (!session.waitingFor.poster || !session.waitingFor.poster.fileId) {
+            return ctx.answerCbQuery("Xatolik: Ma'lumotlar topilmadi.", { show_alert: true });
+        }
+        
+        try {
+            await ctx.telegram.sendPhoto(config.TELEGRAM_CHANNEL_ID, session.waitingFor.poster.fileId, {
+                caption: session.waitingFor.poster.finalCaption,
+                parse_mode: 'HTML'
+            });
+            
+            state.stats.total_posts += 1; 
+            state.stats.history.unshift({
+                type: 'poster',
+                title: session.waitingFor.poster.name,
+                admin: userId,
+                date: new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent', hour12: false })
+            });
+            if (state.stats.history.length > 50) state.stats.history.pop();
+            await saveState();
+
+            if (session.waitingFor.promptMessageId) {
+                try { await ctx.telegram.deleteMessage(ctx.chat.id, session.waitingFor.promptMessageId); } catch(e){}
+                session.waitingFor.promptMessageId = null;
+            }
+            
+            session.waitingFor.type = null;
+            session.waitingFor.poster = { fileId: null, name: null, desc: null, finalCaption: null };
+
+            autoWipe(ctx, (await ctx.replyWithHTML(`🎉 <b>Poster muvaffaqiyatli kanalga joylandi!</b>`)).message_id, 6000);
+            await sendMenu(ctx);
+        } catch (err) {
+            autoWipe(ctx, (await ctx.reply(`❌ Xato: ${err.message}`)).message_id, 10000);
+        }
     });
 
     bot.action('action_preview', async (ctx) => {
@@ -202,7 +235,6 @@ function initActions(bot) {
                 state.stats.total_posts += 1;
                 state.stats.total_videos += successCount;
                 
-                // HAQIQIY STATISTIKA (HISTORY LOG)
                 state.stats.history.unshift({
                     type: ws.mode,
                     title: ws.title,
@@ -211,7 +243,7 @@ function initActions(bot) {
                     admin: userId,
                     date: new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent', hour12: false })
                 });
-                if (state.stats.history.length > 50) state.stats.history.pop(); // Xotirani asrash uchun 50 ta yozuv saqlanadi
+                if (state.stats.history.length > 50) state.stats.history.pop();
 
                 ws.queue = ws.queue.slice(successCount);
                 await saveState();
