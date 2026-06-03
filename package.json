@@ -1,7 +1,7 @@
 {
   "name": "channel-video-manager-bot",
-  "version": "2.0.0",
-  "description": "Production-ready private channel assistant bot with premium UI/UX",
+  "version": "2.1.0",
+  "description": "Production-ready enterprise architecture channel assistant bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
