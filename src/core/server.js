@@ -3,134 +3,129 @@ const cors = require('cors');
 const path = require('path');
 const { state, getWorkspace, saveState } = require('../services/storage');
 const config = require('../config');
-const { bot } = require('./bot'); // Bot instansiyasini chaqiramiz
-const { generateCaption, generateProgressBar } = require('../utils/ui');
+const { bot } = require('./bot'); 
+const { generateCaption } = require('../utils/ui');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// React static fayllarini ulash
 app.use(express.static(path.join(__dirname, '../../dist')));
 
-// 1️⃣ API: Ma'lumotlarni o'qish
+// 1. O'qish API
 app.get('/api/workspace/:userId', (req, res) => {
     const userId = req.params.userId;
-    if (userId !== config.OWNER_ID && !state.admins.includes(userId)) {
-        return res.status(403).json({ error: "Ruxsat yo'q!" });
-    }
+    if (userId !== config.OWNER_ID && !state.admins.includes(userId)) return res.status(403).json({ error: "Ruxsat yo'q!" });
     const ws = getWorkspace(userId);
+    // Watermark va Status defoltlari
+    if (!ws.watermark) ws.watermark = '';
+    if (!ws.uploadStatus) ws.uploadStatus = { isUploading: false, currentVideo: 0, statusText: 'Tayyor' };
     res.json({ success: true, workspace: ws, stats: state.stats, saved_templates: state.saved_templates });
 });
 
-// 2️⃣ API: Loyiha parametrlarini yangilash (Nom, Fasl, Rejim, Shablon)
+// 2. Parametrlarni (va Watermarkni) saqlash
 app.post('/api/workspace/:userId/update', async (req, res) => {
-    const userId = req.params.userId;
-    if (userId !== config.OWNER_ID && !state.admins.includes(userId)) return res.status(403).json({ error: "Ruxsat yo'q!" });
-    
-    const ws = getWorkspace(userId);
-    const { title, season, mode, template } = req.body;
+    const ws = getWorkspace(req.params.userId);
+    const { title, season, mode, template, watermark } = req.body;
     
     if (title !== undefined) ws.title = title;
     if (season !== undefined) ws.season = parseInt(season, 10) || 1;
     if (mode !== undefined) ws.mode = mode;
     if (template !== undefined) ws.template = template;
+    if (watermark !== undefined) ws.watermark = watermark;
     
     await saveState();
     res.json({ success: true, workspace: ws });
 });
 
-// 3️⃣ API: Drag-and-Drop amalini bazada saqlash
+// 3. Drag & Drop saqlash
 app.post('/api/workspace/:userId/reorder', async (req, res) => {
-    const userId = req.params.userId;
-    if (userId !== config.OWNER_ID && !state.admins.includes(userId)) return res.status(403).json({ error: "Ruxsat yo'q!" });
-    
-    const ws = getWorkspace(userId);
-    const { newQueue } = req.body;
-    
-    if (Array.isArray(newQueue)) {
-        ws.queue = newQueue;
-        await saveState();
-    }
+    const ws = getWorkspace(req.params.userId);
+    if (Array.isArray(req.body.newQueue)) { ws.queue = req.body.newQueue; await saveState(); }
     res.json({ success: true });
 });
 
-// 4️⃣ API: Navbatdan bitta videoni o'chirish
+// 4. O'chirish va Bekor qilish (Undo)
 app.delete('/api/workspace/:userId/queue/:index', async (req, res) => {
-    const userId = req.params.userId;
-    if (userId !== config.OWNER_ID && !state.admins.includes(userId)) return res.status(403).json({ error: "Ruxsat yo'q!" });
-    
-    const ws = getWorkspace(userId);
-    const index = parseInt(req.params.index, 10);
-    
-    if (ws.queue[index]) {
-        ws.queue.splice(index, 1);
-        await saveState();
-    }
+    const ws = getWorkspace(req.params.userId);
+    ws.queue.splice(parseInt(req.params.index, 10), 1);
+    await saveState();
     res.json({ success: true, queue: ws.queue });
 });
 
-// 5️⃣ API: KANALGA JOYLASH TRIGGELI (Botni ishga tushirish)
+app.post('/api/workspace/:userId/queue/restore', async (req, res) => {
+    const ws = getWorkspace(req.params.userId);
+    const { item, index } = req.body;
+    ws.queue.splice(index, 0, item); // O'chirilgan joyiga qaytarish
+    await saveState();
+    res.json({ success: true, queue: ws.queue });
+});
+
+// 5. STATUS POLLING (Fonda nima bo'layotganini bilib turish)
+app.get('/api/workspace/:userId/status', (req, res) => {
+    const ws = getWorkspace(req.params.userId);
+    res.json({ success: true, uploadStatus: ws.uploadStatus || { isUploading: false } });
+});
+
+// 6. JONLI KANALGA JOYLASH (Aqlli tizim)
 app.post('/api/workspace/:userId/post', async (req, res) => {
     const userId = req.params.userId;
-    if (userId !== config.OWNER_ID && !state.admins.includes(userId)) return res.status(403).json({ error: "Ruxsat yo'q!" });
-    
     const ws = getWorkspace(userId);
-    const totalVideos = ws.queue.length;
-    if (totalVideos === 0) return res.status(400).json({ error: "Navbat bo'sh!" });
+    if (ws.queue.length === 0) return res.status(400).json({ error: "Navbat bo'sh!" });
 
-    // Yuklash jarayonini asinxron fonda boshlaymiz (Kutish xatosi bermasligi uchun)
-    res.json({ success: true, message: "Yuklash boshlandi" });
+    ws.uploadStatus = { isUploading: true, currentVideo: 0, statusText: 'Boshlanmoqda...' };
+    await saveState();
+    res.json({ success: true });
 
     (async () => {
         let successCount = 0;
-        let hasFatalError = false;
+        let totalVideos = ws.queue.length;
 
         for (let i = 0; i < totalVideos; i++) {
+            ws.uploadStatus = { isUploading: true, currentVideo: i + 1, statusText: 'Yuklanmoqda 🚀' };
+            await saveState();
+            
             let isUploaded = false;
             while (!isUploaded) {
                 try {
-                    await bot.telegram.sendVideo(config.TELEGRAM_CHANNEL_ID, ws.queue[i].fileId, {
-                        caption: generateCaption(ws.queue[i]),
-                        parse_mode: 'HTML'
+                    let finalCaption = generateCaption(ws.queue[0]);
+                    // Custom Watermark qo'shish
+                    if (ws.watermark) finalCaption += `\n\n${ws.watermark}`;
+
+                    await bot.telegram.sendVideo(config.TELEGRAM_CHANNEL_ID, ws.queue[0].fileId, {
+                        caption: finalCaption, parse_mode: 'HTML'
                     });
+                    
+                    ws.queue.shift(); // Yuklanganini ro'yxatdan olib tashlaymiz
                     successCount++;
                     isUploaded = true;
                 } catch (error) {
                     if (error.code === 429) {
-                        const retryAfter = error.response?.parameters?.retry_after || 30;
-                        await new Promise(resolve => setTimeout(resolve, (retryAfter + 1) * 1000));
+                        const waitTime = error.response?.parameters?.retry_after || 35;
+                        ws.uploadStatus.statusText = `Limit. ${waitTime}s kutilmoqda ⏳`;
+                        await saveState();
+                        await new Promise(resolve => setTimeout(resolve, (waitTime + 1) * 1000));
                     } else {
-                        hasFatalError = true;
-                        break;
+                        break; // Boshqa xato
                     }
                 }
             }
-            if (hasFatalError) break;
         }
 
+        // Barcha ishlar tugagach
         if (successCount > 0) {
             state.stats.total_posts += 1;
             state.stats.total_videos += successCount;
-            state.stats.history.unshift({
-                type: ws.mode,
-                title: ws.title,
-                season: ws.mode === 'serial' ? ws.season : null,
-                episodes: successCount,
-                admin: userId,
-                date: new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent', hour12: false })
-            });
-            if (state.stats.history.length > 50) state.stats.history.pop();
-            
-            ws.queue = ws.queue.slice(successCount);
-            await saveState();
+            // B3: Avto Inkrement (Agar serial bo'lsa, keyingi safar uchun faslni avtomat ko'tarib qo'yish imkoniyati)
         }
+        
+        ws.uploadStatus = { isUploading: false, currentVideo: 0, statusText: 'Tayyor' };
+        await saveState();
     })();
 });
 
 function startServer() {
     const port = process.env.PORT || 3000;
-    app.listen(port, () => console.log(`🌐 Premium API Engine active on port ${port}`));
+    app.listen(port, () => console.log(`🌐 Cineora Space Gray API port: ${port}`));
 }
-
 module.exports = { startServer };
